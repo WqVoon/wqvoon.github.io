@@ -15,4 +15,9 @@ links:
 	- name: Ducksoft's Blog
 		avatar:
 		url: https://www.ducksoft.site
+- group: 好盆友们
+	items:
+	- name: 57One's Blog
+		avatar:
+		url: http://57one66.com
 ---
