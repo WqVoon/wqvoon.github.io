@@ -16,6 +16,7 @@ links:
 		avatar:
 		url: https://www.ducksoft.site
 - group: 好盆友们
+	icon: fas fa-user-tie
 	items:
 	- name: 57One's Blog
 		avatar:
