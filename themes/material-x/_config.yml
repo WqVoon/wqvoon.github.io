@@ -68,6 +68,9 @@ cover:
     - name: 博文
       icon: fas fa-rss
       url: /
+    - name: 杂项
+      icon: fas fa-bars
+      url: tools/
     - name: 分类
       icon: fas fa-folder-open
       url: categories/
@@ -80,12 +83,14 @@ cover:
       url: about/
       rel: nofollow
 
-
 # 桌面端导航栏菜单
 menu_desktop:
     - name: 博文
       icon: fas fa-rss
       url: /
+    - name: 杂项
+      icon: fas fa-bars
+      url: tools/
     - name: 分类
       icon: fas fa-folder-open
       url: categories/
@@ -103,6 +108,9 @@ menu_mobile:
     - name: 博文
       icon: fas fa-rss
       url: /
+    - name: 杂项
+      icon: fas fa-bars
+      url: tools/
     - name: 分类
       icon: fas fa-folder-open
       url: categories/
@@ -215,8 +223,8 @@ social:
     url: https://github.com/wqvoon
   - icon: fas fa-headphones-alt
     url: https://music.163.com/#/user/home?id=1731490938
-  - icon: fab fa-qq
-    url: http://sighttp.qq.com/authd?IDKEY=de2d3cb63ba486df334c2085864397b1087cd32b43fc52d7
+# - icon: fab fa-qq
+#   url: http://sighttp.qq.com/authd?IDKEY=de2d3cb63ba486df334c2085864397b1087cd32b43fc52d7
 
 
 # 分享按钮
