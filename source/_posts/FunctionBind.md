@@ -28,7 +28,7 @@ var watcher = this._watcher = new Watcher(..., this._update)
 
 这个 Watcher 对象**将 _update 函数作为一个属性保存在了自己的作用域**中，并在用户触发相应的事件后执行回调。
 
-这个场景下的本意是 Watcher 在监测到事件发生后调用 Directive._update 方法来更新对应的 Directive 实例中的属性，然而我们知道，Javascript 中的 this 是会根据上下文进行变化的，当 Watcher 把 _update 作为自己的属性时，这个 this 就从 Directive 变成 Watcher 了，之后的更新也都会发生在 Watcher 中，这显然偏离了本意。
+这个场景下的本意是 Watcher 在监测到事件发生后调用 Directive._update 方法来更新对应的 Directive 实例中的属性，然而我们知道，Javascript 中的 this 是会根据上下文进行变化的（这里不考虑箭头函数等特殊情况），当 Watcher 把 _update 作为自己的属性时，这个 this 就从 Directive 变成 Watcher 了，之后的更新也都会发生在 Watcher 中，这显然偏离了本意。
 
 而 bind 的作用在于，它强制绑定了代码中 this 的值，使这个函数在赋值给其他对象作为属性且通过该对象进行调用时依然以 bind 中的参数作为 this ，在这里就达到了场景本身的需求。
 
