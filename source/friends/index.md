@@ -18,13 +18,13 @@ links:
 - group: 好盆友们
 	icon: fas fa-user-tie
 	items:
-	- name: 57One 1号's Blog
-		avatar:
-		url: http://57one66.com
-	- name: 57One 2号's Blog
+	- name: 57One's Blog
 		avatar:
 		url: https://www.cnblogs.com/57one/
 	- name: Stupid-Boy's Blog
 		avatar:
-		url: stupid-hentai-boy.github.io
+		url: https://stupid-hentai-boy.github.io/
+	- name: Shiqing233's Blog
+		avatar:
+		url: https://shiqing233.github.io/
 ---
