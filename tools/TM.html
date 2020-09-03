@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>图灵机Demo</title>
+	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+	<meta http-equiv="pragma" content="no-cache">
+	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	
+	<link rel="stylesheet" href="./css/bootstrap.css">
+	<!-- <script language="javascript" src="./js/jquery.js"></script> -->
+	<!-- <script src="./js/bootstrap.js"></script> -->
+	<script src="./js/TM.js"></script>
+
+	<style>
+		body {
+			background-color: #EEEEEE;
+		}
+		body > .container {
+			background-color: #FFFFFF;
+		}
+		header {
+			background-color: #3498DB;
+			color: #FFFFFF;
+		}
+	</style>
+</head>
+
+<body>
+<!-- 完整容器 -->
+	<div class="container shadow my-4 pb-3 bg-white rounded">
+<!-- 标题+导航栏 -->
+		<header class="pt-4 p-3 row">
+		<div class="flex-nowrap justify-content-between align-items-center">
+			<h1>图灵机Demo</h1>
+		</div>
+		</header>
+		<nav class="navbar navbar-expand-sm navbar-dark bg-dark mb-4 row">
+			<div class="navbar-nav">
+				<a class="nav-item nav-link active" id="run-program" href="javascript:void(0)">运行程序</a>
+				<a class="nav-item nav-link" id="make-program" href="javascript:void(0)">制作程序</a>
+			</div>
+		</nav>
+<!-- 运行程序 -->
+		<div class="row" id="run-page">
+<!-- 操作面板 -->
+		<div class="col-lg-4 col-sm-4">
+			<div class="card border-primary mb-4">
+				<div class="card-header bg-primary text-white">
+					<b>操作面板</b>
+				</div>
+				<div class="card-body">
+<!-- 输入程序 -->
+					<div id="load-page">
+						<div class="form-group">
+						    <label for="run-example" >请选择实例：</label>	
+							<select class="form-control" id="run-example">
+								<option value=''>请在此处选择实例</option>
+								<option>课件 例4-1</option>
+								<option>课件 例4-2</option>
+								<option>课件 例4-3</option>
+								<option>课件 例4-4</option>
+								<option>课件 例4-5</option>
+							</select>
+						</div>
+						<div class="form-group">
+							<label for="run-input">或手动输入:</label>
+							<textarea class="form-control" type="text" id="run-input" placeholder="请在此处输入代码"></textarea>
+						</div>
+						<div class="form-group">
+							<button class="btn btn-outline-dark btn-block" id="load-program">加载</button>
+							<button class="btn btn-outline-dark btn-block" id="reset-program">重置</button>
+						</div>
+					</div>
+<!-- 展示元信息 -->
+					<div id="show-page" hidden="">
+						<a id="back-btn" href="javascript:void(0)"><回退</a>
+						<hr>
+						<p id="info-cnt"></p>
+						<p id="info-des">描述：<span></span></p>
+						<p id="info-head">开始状态：<span></span></p>
+						<p id="info-tail">结束状态：<span></span></p>
+						<p id="info-border">空白符号：<span></span></p>
+						<hr>
+						<div class="form-group">
+							<textarea class="form-control" type="text" id="input-string" placeholder="请输入待识别的内容，若是多带图灵机则用:分隔每条带的内容，带上无内容时留空或输入空白符都可以"></textarea>
+						</div>
+						<div class="form-group">
+							<a class="btn btn-outline-dark btn-block" id="run-button" href="#result-block">运行</a>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+<!-- 运行结果 -->
+		<div class="col-lg-8 col-sm-8" id="result-block">
+			<div class="card mb-4 border-info">
+				<div class="card-header bg-info text-white">
+					<b>运行结果</b>
+				</div>
+				<div class="card-body">
+					<p>注：您可以通过敲击回车键或点击该运行框来单步执行，或<a id="run-fast" href="javascript:void(0);">快速执行</a></p><hr>
+					<p id="run-info"></p><hr>
+					<p id="run-result" style="background-color:black;border-radius:5px"></p>
+				</div>
+			</div>
+		</div>
+		</div>
+<!-- 注意事项 -->
+		<div class="alert alert-secondary mb-4">
+			<h4 class="alert-heading">注意：</h4>
+			<div id="little-tip">
+				<span>1.输入的符号均为半角</span><br>
+				<span>2.请不要在输入框中加入空格等特殊字符</span><br>
+				<span>3.Demo版本并未进行错误处理，请确保输入的程序是正确的</span>
+			</div>
+		</div>
+<!-- 制作程序 -->
+		<div class="row" id="make-page" hidden="">
+			<div class="col-lg-12 col-sm-12">
+				<div class="card border-danger mb-4">
+				<div class="card-header bg-danger text-white">
+					<b>请填写如下文本框，点击 生成 后即可生成代码</b>
+				</div>
+				<div class="card-body">
+					<div class="form-group">
+						<label for="make-des">描述:</label>
+						<input class="form-control" type="text" id="make-des" placeholder="请在此处输入描述">
+					</div>
+					<div class="form-group">
+						<label for="make-border">空白符号:</label>
+						<input class="form-control" type="text" id="make-border" placeholder="请在此处输入空白符号">
+					</div>
+					<div class="form-group">
+						<label for="make-head">开始状态:</label>
+						<input class="form-control" type="text" id="make-head" placeholder="请在此处输入开始状态">
+					</div>
+					<div class="form-group">
+						<label for="make-tail">结束状态:</label>
+						<input class="form-control" type="text" id="make-tail" placeholder="请在此处输入结束状态，若有多个则以:分隔">
+					</div>
+					<div class="form-group">
+						<label for="make-rules">跳转规则:</label>
+						<textarea class="form-control" type="text" id="make-rules" placeholder="每行格式为 当前状态:接受字符:转换字符:移动方向(L/R/M):切换状态，以回车结束，若是多带图灵机则用,分割接受字符、转换字符和移动方向"></textarea>
+					</div>
+					<button class="btn btn-outline-dark btn-block" id="make-code">生成</button>
+				</div>
+				</div>
+			</div>
+		</div>
+
+	</div>
+<!-- 版权声明 -->
+	<footer class="my-4">
+		<div class="container text-secondary">
+		<div>© 前端样式来源于<a href="http://ipgw.neu.edu.cn/srun_portal_pc.php?ac_id=1&">信息化建设与网络安全办公室</a>，运行逻辑由<a href="http://yuren123.cn/">Yuren</a>制作</div>
+		</div>
+	</footer>
+<!-- 运行逻辑 -->
+	<script>
+// 仿 jQuery 选择器
+		$ = (query=>{
+			let inside = {};
+			return query=>{
+				inside[query]?1:inside[query]=document.querySelector(query);
+				return inside[query];
+			};
+		})();
+// 大页面切换
+		let tm = new TM();
+		$("#run-program").onclick = ()=>{
+			$("#run-page").hidden=false;
+			$("#make-page").hidden=true;
+			$("#run-program").classList.add('active');
+			$("#make-program").classList.remove('active');
+			$("#little-tip").innerHTML = "<span>1.Demo版本并未进行错误处理，请确保输入的程序是正确的</span><br><span>2.输入的符号均为半角</span>";
+		}
+		$("#make-program").onclick = ()=>{
+			$("#make-page").hidden=false;
+			$("#run-page").hidden=true;
+			$("#make-program").classList.add('active');
+			$("#run-program").classList.remove('active');
+			$("#little-tip").innerHTML = "<span>1.输入的符号均为半角</span><br><span>2.请不要在输入框中加入空格等特殊字符</span><br><span>3.对于跳转规则，比如 q0:a,a,a:a,b,b:R,R,R:q2 表示q0状态分别从三条带子上接受a,a,a并将其变成a,b,b后右移所有带子上的读写头，再跳转到q2</span><br><span>4.对于跳转规则，比如 q0:a:b:R:q2 表示q0状态从1条带子上接受a并将其变成b后右移读写头，再跳转到q2</span><br><span>5.对于跳转规则，移动方向写入除L和R外的值均视为不移动读写头</span>";
+		}
+// 生成按钮被点击
+		$("#make-code").onclick = ()=>{
+			let tmp = new Object();
+			tmp['des'] = $("#make-des").value.replace(/[ ]+/g, '');
+			tmp['border'] = $("#make-border").value.replace(/[ ]+/g, '');
+			tmp['head'] = $("#make-head").value.replace(/[ ]+/g, '');
+			tmp['tail'] = $("#make-tail").value.replace(/[ ]+/g, '').split(':');
+			tmp['rules'] = new Object();
+
+			let rules = $("#make-rules").value.replace(/[ ]+/g, '').split('\n');
+			rules.map((e)=>{
+				if (e === '') return false;
+				let splitOne = e.split(':');
+				tmp['cnt'] = splitOne[1].split(',').length;
+				if (tmp.rules[splitOne[0]]===undefined) {
+					tmp.rules[splitOne[0]] = new Object();
+				}
+				tmp.rules[splitOne[0]][splitOne[1]] = splitOne.slice(2,);
+			});
+			alert(`请复制如下代码：\n${JSON.stringify(tmp)}`);
+		}
+// 加载程序
+		$("#load-program").onclick = ()=>{
+			let content = undefined;
+			let tmpObject = undefined;
+			if ($("#run-input").value) {
+				content = $("#run-input").value;
+			} else if ($("#run-example").value) {
+				content = examples[$("#run-example").value];
+			} else {
+				alert("请输入代码或选择一个实例！");
+				return false;
+			}
+			try {
+				tmpObject = JSON.parse(content);
+			} catch(e) {
+				alert("加载失败！");
+				return false;
+			}
+			
+			if (tmpObject===undefined || tmpObject.head===undefined || tmpObject.border===undefined
+				|| tmpObject.tail===undefined || tmpObject.rules===undefined) {
+				alert("加载失败！");
+				return false;
+			} 
+			tm.load(tmpObject.cnt, tmpObject.des, tmpObject.head, tmpObject.border, tmpObject.tail, tmpObject.rules);
+
+			$("#info-cnt").textContent = tmpObject.cnt+"带图灵机";
+			$("#info-des").children[0].textContent = tmpObject.des;
+			$("#info-head").children[0].textContent = tmpObject.head;
+			$("#info-tail").children[0].textContent = tmpObject.tail;
+			$("#info-border").children[0].textContent = tmpObject.border;
+
+			$("#load-page").hidden = true;
+			$("#show-page").hidden = false;
+			alert('加载成功！');
+		}
+// 重置按钮被点击
+		$("#reset-program").onclick = ()=>{
+			$("#run-example").value = "";
+			$("#run-input").value = "";
+			$("#run-result").textContent = "";
+			$("#run-info").textContent = "";
+			$("#input-string").value = "";
+			alert("重置成功！");
+		}
+// 回退按钮被点击
+		$("#back-btn").onclick = ()=>{
+			$("#input-string").value = "";
+			$("#show-page").hidden = true;
+			$("#load-page").hidden = false;
+		}
+// 运行按钮被点击
+		$("#run-button").onclick = ()=>{
+			tm.reset();
+			if (tm.input($("#input-string").value)==false) {
+				alert(`这是一台${tm.getCnt()}带图灵机，请输入${tm.getCnt()}条带子的内容`);
+				return false;
+			}
+			tm.prepared = true;
+			$("#run-info").textContent = "开始执行！";
+			$("#run-result").textContent = '';
+			let content = getContent();
+			for (let i=0; i<content.length; i++) {
+				$("#run-result").appendChild(content[i]);
+			}
+		}
+// 载入运行时内容
+		function getContent () {
+			let totalOutput = tm.output();
+			let ret = [];
+			for (let j=0; j<totalOutput.length; ++j) {
+				let n = document.createDocumentFragment();
+				let output = totalOutput[j];
+				for (let i=0; i<output.length; ++i) {
+		    		let l = document.createElement('span');
+		    		l.style.fontSize = 'xx-large';
+		    		l.textContent = output[i]+' ';
+		    		if (i===tm.getIndex()[j])
+		    			l.style.color = "red";
+		    		else
+		    			l.style.color = 'grey';
+		    		n.appendChild(l);
+				}
+				n.appendChild(document.createElement('br'));
+				ret.push(n);
+			}
+			return ret;
+		}
+// 点击运行框
+		$("#result-block").onclick = ()=>{
+			if (!tm.prepared) {
+				return false;
+			}
+			let tmp = tm.step();
+			$("#run-info").textContent = tm.info;
+			$("#run-result").textContent = '';
+			let content = getContent();
+			for (let i=0; i<content.length; i++) {
+				$("#run-result").appendChild(content[i]);
+			}
+			if (!tmp) {
+				$("#run-info").textContent = "失败！";
+				tm.prepared = false;
+				return false;
+			} else if (tm.end()) {
+				$("#run-info").textContent = "成功！";
+				tm.prepared = false;
+				return true;
+			}
+		}
+// 敲击回车
+		window.onkeydown = (e)=>{
+			if (e.keyCode == 13) {
+				$("#result-block").click();
+			}
+		}
+// 立即结束
+	 	function runFast(){
+	 		if (tm.prepared) {
+				$("#result-block").click();
+				setTimeout(runFast);
+	 		}
+		}
+		$('#run-fast').onclick = runFast;
+	</script>
+</body>
+</html>
