@@ -15,8 +15,13 @@ jobs:
           ref: backup
 
       - name: Set env
+        env:
+          HEXO_DEPLOY_PRI: ${{secrets.HEXO_DEPLOY_PRI}}
         run: |
           sudo timedatectl set-timezone "Asia/Shanghai"
+          mkdir -p ~/.ssh/
+          echo "$HEXO_DEPLOY_PRI" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
           git config --global user.email "2027195958@qq.com"
           git config --global user.name "WqVoon"
 
@@ -26,7 +31,16 @@ jobs:
           node-version: 12.x
 
       - name: Install dependencies
-        run: npm Install
+        run: npm install
 
       - name: Deploy hexo
-        run: npm run deploy
+        run: |
+          mkdir public
+          cd public
+          git init
+          git remote add origin git@github.com:WqVoon/wqvoon.github.io.git
+          git pull origin master
+          npm run build
+          git add .
+          git commit -m "Site Update: $(date)"
+          git push origin master
