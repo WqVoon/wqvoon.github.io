@@ -1,0 +1,32 @@
+name: deploy
+
+on:
+  push:
+    branches: backup
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      -name: Get my repo
+       uses: actions/checkout@v2
+       with:
+        ref: backup
+
+      -name: Set env
+       run: |
+        sudo timedatectl set-timezone "Asia/Shanghai"
+        git config --global user.email "2027195958@qq.com"
+        git config --global user.name "WqVoon"
+
+      -name: Set up node
+       uses: actions/setup-node@v1
+       with:
+        node-version: 12.x
+
+      -name: Install dependencies
+       run: npm Install
+
+      -name: Deploy hexo
+       run: npm run deploy
