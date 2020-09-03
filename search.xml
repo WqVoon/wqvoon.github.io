@@ -4,6 +4,25 @@
   
     
     <entry>
+      <title>测试 Github Actions</title>
+      <link href="/2020/09/03/GitActionsTest/"/>
+      <url>/2020/09/03/GitActionsTest/</url>
+      
+        <content type="html"><![CDATA[<p>Congratulations to myself :-)</p>]]></content>
+      
+      
+      <categories>
+          
+          <category> 杂项 </category>
+          
+      </categories>
+      
+      
+    </entry>
+    
+    
+    
+    <entry>
       <title>记一次手贱的经历与解决办法</title>
       <link href="/2020/09/01/Docker-Chattr/"/>
       <url>/2020/09/01/Docker-Chattr/</url>
