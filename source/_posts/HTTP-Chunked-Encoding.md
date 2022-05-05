@@ -1,7 +1,9 @@
 ---
 title: 浅谈 Http Chunked Encoding
 date: 2022-05-04 19:55:52
-categories: 前端
+categories:
+ - [前端]
+ - [Golang]
 description: 一些关于 Chunked Encoding 的想法与实践
 ---
 
@@ -15,7 +17,7 @@ description: 一些关于 Chunked Encoding 的想法与实践
 
 # Chunked Encoding 与 curl
 
-我最早了解到 Chunked Encoding 恰恰是在用 curl 来测试服务端不提供 `Content-Length` 会发生什么时。一般来讲，如果你使用 HTTP 的框架提供服务，那么这个请求头是会被框架来处理的。所以最简单的一种绕过框架、发送一个没有这个字段的响应的方式，就是直接使用 TCP，比如在 golang 中你可以编写这样的代码：
+我最早了解到 Chunked Encoding 恰恰是在用 curl 来测试服务端不提供 `Content-Length` 会发生什么时。一般来讲，如果你使用 HTTP 的框架提供服务，那么这个消息头是会被框架来处理的。所以最简单的一种绕过框架、发送一个没有这个字段的响应的方式，就是直接使用 TCP，比如在 golang 中你可以编写这样的代码：
 
 ```go
 func TCPServer() {
@@ -43,7 +45,7 @@ func TCPServer() {
 
 代码不是很标准，因为这个程序没有读取请求而直接发送响应，不过这无伤大雅。代码主要做的事情就是发送一个没有 `Content-Length` 请求头字段的响应，但是在请求体里有 `1234567890` 这样的内容。这时如果执行它，并且使用 `curl -v localhost:8080`，那么在 curl 的输出中可以发现 ` no chunk, no close, no size. Assume close to signal end` 这样的输出，这证明了我在前言中的描述。
 
-那么，Chunked Encoding 的响应体是什么样的呢？我们仍然可以用 golang 和 curl 进行测试。
+那么，Chunked Encoding 的响应体是什么样的呢，为什么它会被 curl 区别对待？我们仍然可以用 golang 和 curl 进行测试。
 
 golang 的 http 包本身就支持 Chunked Encoding，它的 http.ResponseWriter 接口可以被显式转换成 Flusher 接口，这个接口提供一个 Flush 方法，如果调用它，那么它会以 Chunked Encoding 方式处理发送的内容，于是我们可以编写这样的代码：
 
