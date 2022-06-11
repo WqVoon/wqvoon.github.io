@@ -4,8 +4,10 @@
   <meta charset="utf-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   
-  <title>在 Docker for MacOS 中运行 GUI 程序 | Yuren Blog</title>
+  <title>【好文翻译】如何解读路由表中的信息 | Yuren Blog</title>
   
+  
+  <meta name="description" content="本文是 Diego Assencio 大大发布在个人博客中的一篇文章，通过举例的方式描述了 Linux 系统中路由表信息的含义，这里仅做翻译及总结">
   
 
   
@@ -296,8 +298,8 @@
         
   
     <h1 class="title">
-      <a href="/2019/10/14/Run-GUI-in-Docker/">
-        在 Docker for MacOS 中运行 GUI 程序
+      <a href="/2022/06/11/Interpreting-Routing-Table/">
+        【好文翻译】如何解读路由表中的信息
       </a>
     </h1>
   
@@ -328,7 +330,7 @@
             <div class="new-meta-item date">
   <a class='notlink'>
     <i class="fas fa-calendar-alt" aria-hidden="true"></i>
-    <p>2019-10-14</p>
+    <p>2022-06-11</p>
   </a>
 </div>
 
@@ -338,9 +340,9 @@
             
   
   <div class='new-meta-item category'>
-    <a href='/categories/Docker/' rel="nofollow">
+    <a href='/categories/网络/' rel="nofollow">
       <i class="fas fa-folder-open" aria-hidden="true"></i>
-      <p>Docker</p>
+      <p>网络</p>
     </a>
   </div>
 
@@ -380,42 +382,49 @@
 
     <section class="article typo">
       <div class="article-entry" itemprop="articleBody">
-        <p>内容包括：前言+环境+具体操作+原理</p>
-<a id="more"></a>
+        <h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><p>为了了解 <code>ip route</code> 命令显示的信息有什么含义，以及它对 Linux 收发网络包的影响，我在网络上搜索了很多文章，但是这些文章多数都仅仅是按序描述每个字段的作用，没有通过具体的例子来加深印象。偶然间，在 Diego Assencio 大大的个人网站里发现了<a href="https://diego.assencio.com/?index=d71346b8737ee449bb09496784c9b344#:~:text=On%20Linux%2C%20there%20are%20two%20commands%20which%20are,the%20ip%20command%2C%20open%20a%20terminal%20and%20run%3A" target="_blank" rel="noopener">这篇文章</a>，拜读之后感觉收获颇丰。</p>
+<p>这篇文章给出了两个例子，第一个例子是常见的网络访问，第二个则是在 VPN 环境下的网络访问，通过阅读这篇文章，至少对于我而言有种茅塞顿开的感觉，尤其是后面 VPN 的例子，读完后就能更好地了解容器网络或虚拟机网络的实现方式。</p>
+<p>所以本文尝试翻译 Diego Assencio 的文章，一方面做一个初次翻译的尝试，一方面备份在这里方便未来自己的阅读，侵删。</p>
+<h1 id="正文"><a href="#正文" class="headerlink" title="正文"></a>正文</h1><p>这篇文章将会描述如何解读 Linux 系统中路由表的信息。所谓路由表其实就是一个包含了许多路由规则的表单，网络包会根据它的目的地址来选择使用其中的哪条规则。</p>
+<p>为了更好地理解这篇文章描述的内容，读者必须先理解两件事情：<strong>CIDR 表示法</strong>（这东西以 <code>&lt;network-prefix&gt;/&lt;netmask-length&gt;</code> 的格式来声明一个 IP 地址的子网）以及<strong>最长前缀匹配算法</strong>（译者注：事实上，对 tun/tap 设备的了解也是必须的，这对于理解下文 VPN 的例子尤其重要）。如果读者目前还不了解它们，请先花一些时间来学习，然后再继续阅读本文。此外，我们接下来要描述的例子都基于 IPv4 网络，但是相关的概念对 IPv6 网络也同样适用。</p>
+<p>在 Linux 系统上，主要有两个命令用于获取路由表信息：<strong>route</strong> 和 <strong>ip</strong>。本文将使用 ip 命令，因为它输出的内容比 route 命令更加易于解读。为了使用 ip 命令来显示操作系统中路由表的内容，请打开一个终端模拟器（terminal），然后运行下面的命令：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">ip route show</span><br></pre></td></tr></table></figure>
 
+<p>这个命令的输出取决于机器的网络配置以及实际的网络拓扑。比如让我们来考虑一个通过无线网络连接到路由器以访问外部网络的机器，机器的 IP 地址为 192.168.1.100，而路由器的地址为 192.168.1.1，那么 ip 命令的输出就有可能如下：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">default via 192.168.1.1 dev wlan0</span><br><span class="line">192.168.1.0/24 dev wlan0  proto kernel  scope link  src 192.168.1.100</span><br></pre></td></tr></table></figure>
 
+<p>让我们从第二行开始解读这个输出。这一行表示“任何被发往 192.168.1.0/24 这个网络的包都会以 192.168.1.100 作为源地址，然后被 wlan0 这个设备发送出去”，192.168.1.100 这个地址是 DHCP 服务端为 wlan0 设备分配的地址。而剩下的部分则可能不那么有趣：<code>proto kernel</code> 表示这条路由是被操作系统内核在自动配置期间创建的；而 <code>scope link</code> 则表示在 192.168.1.0/24 这个网络中的目标地址都仅对 wlan0 这个设备有效。</p>
+<p>而这个输出中的第一行则表示所有网络包的默认路由（即，当没有其他路由可以被使用时，网络包将使用这一条路由）。具体含义指网络包将被 wlan0 设备发送到默认网关（译者注：通常就是指家用路由器），而这个网关的地址是 192.168.1.1。</p>
+<p>ip 这个命令的输入非常灵活，例如可以只输入命令的一部分，然后这个输入就会被 ip 命令自动在内部进行补全。举例来说，下面所有的命令实际上都是等价的：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">ip r s</span><br><span class="line">ip r show</span><br><span class="line">ip ro sh</span><br><span class="line">ip route show</span><br></pre></td></tr></table></figure>
 
-<h1 id="0x0-前言"><a href="#0x0-前言" class="headerlink" title="0x0 前言"></a>0x0 前言</h1><p>在初步接触了 Docker 后，突然萌生了一个“可不可以在其中跑GUI程序的念头”，遂急忙STFW&amp;&amp;RTFM，并在查阅了相关的一些文档后，成功在本地运行了容器内的GUI测试程序，下面记录一下相关的工作和原理。</p>
-<h1 id="0x1-相关环境"><a href="#0x1-相关环境" class="headerlink" title="0x1 相关环境"></a>0x1 相关环境</h1><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">Docker version 18.09.2</span><br><span class="line">XQuartz 2.7.11（xorg-server 1.18.4)</span><br></pre></td></tr></table></figure>
-
-<p>以上软件均可通过 <a href="https://brew.sh" target="_blank" rel="noopener">homebrew</a> 进行安装</p>
-<h1 id="0x2-具体操作"><a href="#0x2-具体操作" class="headerlink" title="0x2 具体操作"></a>0x2 具体操作</h1><ol>
-<li>XQuartz -&gt; 偏好设置 -&gt; 安全性 -&gt; 勾选“允许从网络客户端连接” -&gt; 退出程序；</li>
-<li>终端键入 <code>xhost +</code>（注意两者之间的空格）重新启动 XQuartz；</li>
-<li>使用诸如 <code>nmap</code> 类的工具查看 6000 端口是否被 X11 服务占用，如果已经被占用即可继续下一步操作，如果没有被占用的话…因为没遇到过所以我也不知道怎么办:-P；</li>
-<li>在 run 或 exec 容器时加入<code>-e DISPLAY=host.docker.internal:0</code>参数，比如我这里通过对一个现有的，已经安装过 xarclock 时钟小程序的容器 toyOS 执行<code>docker exec -ite DISPLAY=host.docker.internal:0 toyOS /usr/bin/xarclock</code>，就会在我的本地出现一个小时钟的GUI程序；</li>
-</ol>
-<h1 id="0x3-相关原理"><a href="#0x3-相关原理" class="headerlink" title="0x3 相关原理"></a>0x3 相关原理</h1><p>在 Linux 系统及一些 Unix-like 系统中，有着 <a href="http://linfo.org/x.html" target="_blank" rel="noopener">X Window System</a> 的概念（下面简称为 X系统），用户的 GUI 程序作为 X Client 向本地或远程的 X Server 交互，以得到底层的支持来在运行 X Server 的设备上绘制出图像，而 <a href="https://www.xquartz.org" target="_blank" rel="noopener">XQuartz</a> 则是一款面向 MacOS 系统的 X系统，（在我理解的层面上）也提供了如上的功能支持。</p>
-<p>于是在这个原理的支撑下，<strong>如何让 Docker 运行 GUI 程序</strong> 这个问题就被转化成了 <strong>如何在宿主机运行 X Server</strong> 以及 <strong>如何让 Docker 中的 X Client  与宿主机的 X Server 实现交互</strong>，下面分别来解决这两个问题：</p>
-<h2 id="0x31-如何在宿主机运行-X-Server"><a href="#0x31-如何在宿主机运行-X-Server" class="headerlink" title="0x31 如何在宿主机运行 X Server"></a>0x31 如何在宿主机运行 X Server</h2><p>在 X系统的定义中可以看到，本身该系统就可以支持以网络为基础的 C-S 模型（虽然关注点更倾向于服务方），XQuartz 作为它的一种实现当然也不例外。但是出于<a href="https://security.stackexchange.com/questions/14815/security-concerns-with-x11-forwarding" target="_blank" rel="noopener">安全上的考虑</a>，XQuartz 默认是不允许通过网络进行交互的。要关闭这个限制，有两个方面要实现，分别对应 <strong>具体操作</strong> 中的1，2两个操作，第一个操作就像字面上的意思一样，关闭了网络连接限制，第二个操作则是关闭了连接鉴定（access control），可以通过运行 <code>man xhost</code> 来查看其 Man Page 以获得更多的信息。需要注意的是，因为本次实验的操作都是在本地实现的，所以完全关闭了连接鉴定，这在涉及到远程操作时是非常不安全的。</p>
-<p>执行了上述步骤且 6000 端口被监听（默认情况）时，我们就成功在宿主机上运行起了 X Server，接下来就要解决第三个问题了。</p>
-<h2 id="0x32-如何让-Docker-中的-X-Client-与宿主机的-X-Server-实现交互"><a href="#0x32-如何让-Docker-中的-X-Client-与宿主机的-X-Server-实现交互" class="headerlink" title="0x32 如何让 Docker 中的 X Client  与宿主机的 X Server 实现交互"></a>0x32 如何让 Docker 中的 X Client  与宿主机的 X Server 实现交互</h2><p>作为 X Client 的程序如果想与 X Server 进行交互，大致分为两种方式：</p>
+<p>接下来让我们来考虑一个更复杂的例子，当设备连接到一个虚拟专用网络（VPN）时，所有网络流量都会经过一个加密隧道（tunnel）被发送到 VPN 服务端。我们以一个 OpenVPN 的网络作为例子，在这个例子中，我们有如下设备及其 IP 地址：</p>
 <ul>
-<li>在命令后加 <code>--display</code> 参数并指明相关的位置</li>
-<li>用户提前设置好环境变量 <code>DISPLAY</code> ，程序从该变量获得相关信息</li>
+<li>tun0：192.168.254.10</li>
+<li>wlan0：192.168.1.100</li>
+<li>路由器：192.168.1.1</li>
+<li>OpenVPN 服务端：95.91.22.94</li>
 </ul>
-<p>这里我们采用第二种方式，故在启动容器时通过 <code>-e</code> 参数为其设置 <code>DISPLAY</code> 变量，现在的问题在于，如何解释变量的值 <code>host.docker.internal:0</code> 呢？</p>
-<p>对于该变量中，冒号前面的部分，<a href="https://docs.docker.com/docker-for-windows/networking/" target="_blank" rel="noopener">Docker 官方文档</a>中有如下解释：</p>
-<blockquote>
-<p>The host has a changing IP address (or none if you have no network access). From 18.03 onwards our recommendation is to connect to the special DNS name <code>host.docker.internal</code>, which resolves to the internal IP address used by the host. </p>
-</blockquote>
-<p>也就是说，这个值本质上是获得了宿主机的内部IP，为了验证这一点，可以通过 <code>ifconfig</code> 命令来查看宿主机实际的IP，并将 <code>DISPLAY</code> 的值换成 <code>your_ip:0</code> ，可以发现和前面一样可以运行。之所以本次实验采用了前者，是因为要获取实际IP，第一是过程很麻烦，第二是设备要处于联网的状态下，而在文档的描述中可以看到 <code>(or none if you have no network access)</code> 这句话，也就是说，这种参数设置在无网络的条件下也可以正常运行。</p>
-<p>那么 <code>DISPLAY</code> 的值就可以被解释为 <code>your_ip:0</code> 了，关于这个格式，其实它的完整形式为 <code>your_ip: display_number. screen_number</code> ，在本实验中其实可以写为 <code>host.docker.internal:0.0</code>，<code>display_number</code> 和 <code>screen_number</code> 均从0开始计数，前者表示一个输入流的标号（输入流包括显示器，键盘，鼠标等），后者表示输入流中某个具体的显示屏，因为很少有人使用多屏幕，所以 <code>screen_number</code> 多数情况下均为0，也就可以省略掉了。</p>
-<p>而对于 <code>display_number</code>，<a href="https://www.x.org/releases/X11R7.7/doc/xproto/x11protocol.html" target="_blank" rel="noopener">X11 protocol 官方文档</a>中有如下描述：</p>
-<blockquote>
-<p>For TCP connections, displays on a given host are numbered starting from 0, and the server for display N listens and accepts connections on port 6000 + N.</p>
-</blockquote>
-<p>也就是说，这个值实际上取决于宿主机上 X11 服务占用的端口，用端口号减掉6000即可，这就是上述命令中冒号后面的0的具体含义。为了验证这一点，可以使用 <code>socat</code> 工具运行 <code>socat tcp-listen:6100,reuseaddr,fork tcp:localhost:6000</code> 命令，将6100端口的消息转交给6000端口，这样按照上面的描述，<code>DISPLAY</code> 变量的值就可以为 <code>host.docker.internal:100</code> ，替换后执行完整命令，可以发现一样能运行GUI测试程序。</p>
+<p>一个网络包在被发往目的地的途中会经历如下的流程：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">原始网络包 --&gt; tun0 -加密后的网络包-&gt; wlan0 --&gt; 路由器 --&gt; OpenVPN 服务端 -解密后的网络包-&gt; 目的地</span><br></pre></td></tr></table></figure>
+
+<p>首先，一个虚拟网络设备（通常叫做 tun0）会被创建，然后一些路由信息会被加入到路由表中，这些信息引导所有的流量经过 tun0 这个设备，在这里网络包会被加密，然后最终通过 wlan0 这个网络设备被发送到 OpenVPN 的服务端。</p>
+<p>下面是一种可能的路由表输出，这个输出来源于一个已经连接到 OpenVPN 服务端的设备（也就是 OpenVPN 的客户端）：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">0.0.0.0/1 via 192.168.254.9 dev tun0</span><br><span class="line">default via 192.168.1.1 dev wlan0</span><br><span class="line">95.91.22.94 via 192.168.1.1 dev wlan0</span><br><span class="line">128.0.0.0/1 via 192.168.254.9 dev tun0</span><br><span class="line">192.168.1.0/24 dev wlan0  proto kernel  scope link  src 192.168.1.100</span><br><span class="line">192.168.254.0/24 via 192.168.254.9 dev tun0</span><br><span class="line">192.168.254.9 dev tun0  proto kernel  scope link  src 192.168.254.10</span><br></pre></td></tr></table></figure>
+
+<p>直接解释这个路由表中的所有细节显得有些单调乏味，所以我们将关注这些输出中的重点部分。请注意第二行：这个设备上的默认路由并没有发生变化。然而，第一行和第四行引入了两条新的路由规则，这将完全改变游戏的规则：被发送到 0.0.0.0/1 和 128.0.0.0/1 两个网络的所有网络包都会经过 tun0 设备，并且以 192.168.254.9 作为网关的地址。</p>
+<p>这里需要注意的是，0.0.0.0/1 和 128.0.0.0/1 分别匹配目标地址的第一个比特位为 0 和 1 的网络包。当它们一起工作时，就可以代替第二行的规则成为新的默认路由规则。因为对于任何一个网络包而言，它的目标地址的第一个比特位不是 0 就是 1，而根据<strong>最长前缀匹配算法</strong>，网络包将优先选择这两条规则（译者注：可以认为 default 路由中目标地址子网掩码的长度为 0）。因此，当 OpenVPN 进程为主机创建了这两条路由后，所有的网络包都会默认被发往 tun0 设备，而从这里开始，网络包就会被加密发送到 95.91.22.94（OpenVPN 服务端的地址）。显而易见，上面输出中的第三行描述了这部分内容：被发往 95.91.22.94 的网络包都由 wlan0 设备以 192.168.1.1 作为网关发出。</p>
+<p>一些读者可能会好奇上面的输出中 192.168.254.9 这个地址，那么它是怎么来的呢？事实上，OpenVPN 在创建 tun0 设备时是以 point-to-point 模式创建的，这意味着这个设备在工作时就好像直接连接在另一端上（译者注：也就是不需要通过中间路由器进行转发），而这个 192.168.254.9 就是另一端的设备，它实际上就是 OpenVPN 的服务端。服务端负责创建 192.168.254.0/24 这个虚拟网络，然后从地址池中选出空闲的 IP 地址分配给那些连接到自己的主机。如上面输出的最后一行所示，192.168.254.10 就是这个路由表所在的主机被分配到的地址，而 192.168.254.9 则是服务端在这个虚拟网络中的地址。</p>
+<p>读者可以通过运行下面的例子来更清晰地证明上面的描述：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">ip addr show dev tun0</span><br></pre></td></tr></table></figure>
+
+<p>对于我们的例子而言，这条命令的输出可以非常清晰地展示前文所述的 point-to-point 连接（注意倒数第二行）：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">21: tun0: &lt;POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP&gt; mtu 1500 qdisc pfifo_fast state UNKNOWN group default qlen 100</span><br><span class="line">    link/none</span><br><span class="line">    inet 192.168.254.10 peer 192.168.254.9/32 scope global tun0</span><br><span class="line">       valid_lft forever preferred_lft forever</span><br></pre></td></tr></table></figure>
+
+<h1 id="说明"><a href="#说明" class="headerlink" title="说明"></a>说明</h1><p>这篇文章描述了两个路由表影响网络包收发的例子，如果读者不了解 tun/tap 设备，在阅读 VPN 部分时可能会比较吃力。</p>
+<p>简单来说，这种设备可以由系统中的某一个进程打开，然后进程可以选择读取或写入这个设备，如果有网络包被发送到这个设备，那么进程就可以从中读取到数据，和常规的 socket 不同的是，tun 设备可以读取到 IP 层的内容，tap 设备则可以读取到链路层的内容。所以如果进程在收到网络包后将它包装在一个常规的 tcp 或 udp 包中，再经过物理网卡发送到外部网络的某台主机上，那么这台目标主机在解包后就可以看到原始的 IP 包或链路层的内容，从而好像内部的这个网络包直接到达了主机上，以此营造出源主机和目标主机在这个内部网络包层面是相互可达的假象，这种虚拟化技术被叫做 Overlay 网络，如今被广泛运用于容器或虚拟机技术中。</p>
+<p>于是在上面 VPN 的例子中，192.168.254.0/24 实际上就是内部网络包的源地址与目的地址所属的网络，而 OpenVPN 的实际网络地址其实是 95.91.22.94，也就是说，如果没有 OpenVPN 创建的 tun 设备，主机通过正常的网络只能访问 95.91.22.94 这个地址。</p>
+<h1 id="其他"><a href="#其他" class="headerlink" title="其他"></a>其他</h1><p>我的大学老师曾对我说，计算机领域要研究的内容总是离不开计算、存储和网络，这句话在近期深入学习容器技术的过程中不断出现在我的脑海里。 Diego Assencio 大大的原文中让我眼前一亮的其实就是 VPN 这个例子，它也是 flannel 项目最初实现的 udp 后端的核心原理，帮助我理解了更多网络方面的有趣知识。笔者对这篇文章的出现表示衷心的感谢。</p>
 
       </div>
       
@@ -449,7 +458,7 @@
       
         <a class="-mob-share-qq" title="QQ好友" rel="external nofollow noopener noreferrer"
           
-          href="http://connect.qq.com/widget/shareqq/index.html?url=/2019/10/14/Run-GUI-in-Docker/&title=在 Docker for MacOS 中运行 GUI 程序 | Yuren Blog&summary=内容包括：前言+环境+具体操作+原理"
+          href="http://connect.qq.com/widget/shareqq/index.html?url=/2022/06/11/Interpreting-Routing-Table/&title=【好文翻译】如何解读路由表中的信息 | Yuren Blog&summary="
           
           >
           
@@ -461,7 +470,7 @@
       
         <a class="-mob-share-qzone" title="QQ空间" rel="external nofollow noopener noreferrer"
           
-          href="https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=/2019/10/14/Run-GUI-in-Docker/&title=在 Docker for MacOS 中运行 GUI 程序 | Yuren Blog&summary=内容包括：前言+环境+具体操作+原理"
+          href="https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=/2022/06/11/Interpreting-Routing-Table/&title=【好文翻译】如何解读路由表中的信息 | Yuren Blog&summary="
           
           >
           
@@ -473,7 +482,7 @@
       
         <a class="-mob-share-weibo" title="微博" rel="external nofollow noopener noreferrer"
           
-          href="http://service.weibo.com/share/share.php?url=/2019/10/14/Run-GUI-in-Docker/&title=在 Docker for MacOS 中运行 GUI 程序 | Yuren Blog&summary=内容包括：前言+环境+具体操作+原理"
+          href="http://service.weibo.com/share/share.php?url=/2022/06/11/Interpreting-Routing-Table/&title=【好文翻译】如何解读路由表中的信息 | Yuren Blog&summary="
           
           >
           
@@ -497,20 +506,20 @@
       
           <div class="prev-next">
               
-                  <section class="prev">
-                      <span class="art-item-left">
-                          <h6><i class="fas fa-chevron-left" aria-hidden="true"></i>&nbsp;上一页</h6>
+              
+                  <section class="next">
+                      <span class="art-item-right" aria-hidden="true">
+                          <h6>下一页&nbsp;<i class="fas fa-chevron-right" aria-hidden="true"></i></h6>
                           <h4>
-                              <a href="/2019/11/20/NEXCTF-WriteUp/" rel="prev" title="NEXCTF 招新赛 WirteUP">
-                                
-                                    NEXCTF 招新赛 WirteUP
-                                
+                              <a href="/2022/05/04/HTTP-Chunked-Encoding/" rel="prev" title="浅谈 Http Chunked Encoding">
+                                  
+                                      浅谈 Http Chunked Encoding
+                                  
                               </a>
                           </h4>
                           
                       </span>
                   </section>
-              
               
           </div>
       
@@ -536,7 +545,7 @@
 
   <script>
     window.subData = {
-      title: '在 Docker for MacOS 中运行 GUI 程序',
+      title: '【好文翻译】如何解读路由表中的信息',
       tools: true
     }
   </script>
