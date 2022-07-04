@@ -340,9 +340,9 @@
             
   
   <div class='new-meta-item category'>
-    <a href='/categories/分布式/' rel="nofollow">
+    <a href='/categories/存储/' rel="nofollow">
       <i class="fas fa-folder-open" aria-hidden="true"></i>
-      <p>分布式</p>
+      <p>分布式&nbsp;/&nbsp;论文&nbsp;/&nbsp;存储</p>
     </a>
   </div>
 
@@ -419,13 +419,13 @@
 </tr>
 </tbody></table>
 <p>为什么这样区分呢？且听我细细道来。</p>
-<h2 id="第1组"><a href="#第1组" class="headerlink" title="第1组"></a>第1组</h2><p>对于 open/close 操作，论文中并没有过多的提及，但我们前面提到为了优化性能，Client 会缓存一些信息。比如在读取时，它会通过 Master 查询“文件 A 的第 X 个 Chunk 在哪”这样的信息，并以文件名+Chunk下标作为键进行缓存，缓存的过期方式有两个，其一是达到了设置的过期时间，其二就是重新打开这个文件。对于重新打开文件这一点，论文 2.7.1 节中的描述是 <code>which purges from the cache all chunk in- formation for that file</code>。基于这一点，我推测文件的打开和关闭操作主要影响的是客户端，比如 open 操作用于在客户端建立对应文件的缓存结构，而 close 操作将这个结构释放掉。</p>
-<p>我没有在论文中找到类似排他读写的操作，如果 GFS 支持这种操作，那么 open/close 必然要通知到 Master。与之类似的，如果 GFS 可以防止文件在读写时不会被删除，那么这两个操作也同样需要被通知到 Master。</p>
+<h2 id="第1组"><a href="#第1组" class="headerlink" title="第1组"></a>第1组</h2><p>对于 open/close 操作，论文中并没有过多的提及，但我们前面提到为了优化性能，Client 会缓存一些信息。比如在读取时，它会通过 Master 查询“文件 A 的第 X 个 Chunk 在哪”这样的信息，并以文件名+Chunk下标作为键进行缓存，缓存的过期方式有两个，其一是达到了设置的过期时间，其二就是重新打开这个文件。对于重新打开文件这一点，论文 2.7.1 节中的描述是 <code>which purges from the cache all chunk information for that file</code>。基于这一点，我推测文件的打开和关闭操作主要影响的是客户端，比如 open 操作用于在客户端建立对应文件的缓存结构，而 close 操作将这个结构释放掉。</p>
+<p>我没有在论文中找到类似排他打开的操作，如果 GFS 支持这种操作，那么 open/close 必然要通知到 Master。与之类似的，如果 GFS 可以避免文件在打开时被删除，那么这两个操作也同样需要被通知到 Master。</p>
 <h2 id="第2组"><a href="#第2组" class="headerlink" title="第2组"></a>第2组</h2><p>我们前面提到，Master 中保存了文件到 Chunk 的映射。这里所谓的文件，其实就是 /x/y/z 这样的一个字符串，GFS 并没有常规文件系统中的目录的结构（这种结构中记录了目录中的内容），所以我认为在实现上Master 的这种映射关系保存成 kv 存储也没问题，但是出于减小体积、加快查找速度、方便恢复（详见后文）等方面的考虑，GFS 将文件路径组织成树状结构，并称其为 Namespace。在这棵树上的每个节点都有一对锁，分别是 read 锁与 write 锁，两种锁相互配合来避免并发的操作导致 Namespace 的混乱。这里的操作指什么呢，主要指的就是第二组中的内容。</p>
 <h3 id="create-操作"><a href="#create-操作" class="headerlink" title="create 操作"></a>create 操作</h3><p>顾名思义，create 用于在 Namespace 中建立一个新的节点，论文中没有提到 create 的流程，但我认为如果仅仅是 create 文件，那并不需要立即为其创建一个 chunk，可以把 chunk 的创建延迟到到对这个文件执行写入时。前面提到 Namespace 中的每个节点都有一对锁，在 create 一个新节点时这对锁也会参与进来。具体来说，假设我们要创建 /home/hygao/file1，那么在创建的过程中 /home、/home/hygao 都会被加上 read 锁，而 /home/hygao/file1 会被加上 write 锁。这意味着，我们可以同时创建 /home/hygao/file2，因为 /home 和 /home/hygao 都是 read 锁，而 read 锁之间并不冲突，但我们不能同时创建 /home/hygao/file1，因为 /home/hygao/file1 已经被上了 write 锁，write 锁之间是相互冲突的。</p>
 <h3 id="delete-操作"><a href="#delete-操作" class="headerlink" title="delete 操作"></a>delete 操作</h3><p>论文中重点介绍了删除文件的场景，但没怎么提及删除目录的场景（从论文 4.1 小节中可以推断出 GFS 是支持删除目录的），所以这里仅讨论删除文件的相关内容。GFS 的 delete 包括 Master 中元数据的删除以及对应 Chunk 的删除，整个过程需要和 Master 的垃圾回收功能相配合。</p>
 <p>具体而言，当用户申请删除一个文件时，GFS 将这个文件 rename 为一个隐藏名（其实个人电脑的回收站也是这个原理），这个隐藏名中记录了删除时的时间戳。GFS 会定期扫描 Namespace，所以它可以知道这些被标记为“应该删除”的文件已经在“回收站”中保存了多久，而用户可以配置一个最大保存时间，超过这个时间的“应该删除”的文件就会真的执行删除，在此之前，用户可以通过将这些文件 rename 成普通文件的方式来避免它们被删除。所谓”真的执行删除“，就是将这个节点从 Namespace 中移除掉，这样该文件对应的 Chunk 就变成了孤儿（orphaned chunk），即没有任何一个文件引用它们，此时 Master 就可以向对应的 ChunkServer 发送指令，让它们删除掉对应的 chunk，从而释放硬盘空间。</p>
-<p>这种机制的好处在于删除操作会非常快速，且误删时在一定时间内还可以将其快速恢复。与之相对的，坏处在于所谓的删除其实并没有立即释放出硬盘的空间，这在空间吃紧的情况下是非常无力的。如何解决这个问题呢？根据论文的描述，如果用户重复删除同一个文件，那么垃圾回收会被加速；此外，用户可以指定一个<strong>节点</strong>的删除策略，这样在用户执行 delete 时文件就会被立即删除并释放空间，这样的删除不可恢复，而这里提到的节点，其实就代表可以在目录和文件两个维度进行配置。</p>
+<p>这种机制的好处在于删除操作会非常快速（因为仅涉及 namespace 的操作），且误删时在一定时间内还可以将其快速恢复。与之相对的，坏处在于所谓的删除其实并没有立即释放出硬盘的空间，这在空间吃紧的情况下是非常无力的。如何解决这个问题呢？根据论文的描述，如果用户重复删除同一个文件，那么垃圾回收会被加速；此外，用户可以指定一个<strong>节点</strong>的删除策略，这样在用户执行 delete 时文件就会被立即删除并释放空间，这样的删除不可恢复，而这里提到的节点，其实就代表可以在目录和文件两个维度进行配置。</p>
 <p>其实根据上面的描述，可以推测出还有第三种加速删除的方式，因为 GFS 判断文件在“回收站”里保存了多久是根据文件名中的时间戳，而用户首先可以访问这些文件，其次可以对其 rename，那只要修改掉文件中的时间戳，让 GFS 认为这个文件已经被保存很久了，就可以在下次垃圾回收时将它清理掉了:-P</p>
 <p>此外由于在对文件操作时（比如后面的 snapshot）不能将其删除，所以可以推测 delete 也会给文件加上 write 锁。</p>
 <h3 id="snapshot-操作"><a href="#snapshot-操作" class="headerlink" title="snapshot 操作"></a>snapshot 操作</h3><p>根据我的理解，snapshot 操作应该类似于个人电脑上对文件或文件夹的复制，复制后的文件或目录拥有与复制源相同的内容，但对复制后的内容的修改不会影响到复制源。GFS 支持目录和文件两个级别的 snapshot，不过论文中只介绍了文件级别的流程，所以这里也同样仅讨论文件的 snapshot 操作。GFS 对这个操作做了一些优化，具体包括 CoW 和本地复制。</p>
@@ -447,10 +447,10 @@
     <div class='new-meta-box'>
       
         
-          <div class="new-meta-item date" itemprop="dateUpdated" datetime="2022-07-04T01:31:15+08:00">
+          <div class="new-meta-item date" itemprop="dateUpdated" datetime="2022-07-05T03:08:43+08:00">
   <a class='notlink'>
     <i class="fas fa-clock" aria-hidden="true"></i>
-    <p>更新于 2022年7月4日</p>
+    <p>更新于 2022年7月5日</p>
   </a>
 </div>
 
@@ -516,6 +516,20 @@
       
       
           <div class="prev-next">
+              
+                  <section class="prev">
+                      <span class="art-item-left">
+                          <h6><i class="fas fa-chevron-left" aria-hidden="true"></i>&nbsp;上一页</h6>
+                          <h4>
+                              <a href="/2022/07/05/GFS2/" rel="prev" title="浅析 Google File System（二）">
+                                
+                                    浅析 Google File System（二）
+                                
+                              </a>
+                          </h4>
+                          
+                      </span>
+                  </section>
               
               
                   <section class="next">
@@ -678,13 +692,17 @@
         
           <li><a class="flat-box" title="/categories/Golang/" href="/categories/Golang/"><div class='name'>Golang</div><div class='badge'>(2)</div></a></li>
         
-          <li><a class="flat-box" title="/categories/分布式/" href="/categories/分布式/"><div class='name'>分布式</div><div class='badge'>(2)</div></a></li>
+          <li><a class="flat-box" title="/categories/分布式/" href="/categories/分布式/"><div class='name'>分布式</div><div class='badge'>(3)</div></a></li>
         
-          <li><a class="flat-box" title="/categories/前端/" href="/categories/前端/"><div class='name'>前端</div><div class='badge'>(5)</div></a></li>
+          <li><a class="flat-box" title="/categories/前端/" href="/categories/前端/"><div class='name'>前端</div><div class='badge'>(4)</div></a></li>
+        
+          <li><a class="flat-box" title="/categories/存储/" href="/categories/存储/"><div class='name'>存储</div><div class='badge'>(2)</div></a></li>
         
           <li><a class="flat-box" title="/categories/杂项/" href="/categories/杂项/"><div class='name'>杂项</div><div class='badge'>(1)</div></a></li>
         
-          <li><a class="flat-box" title="/categories/网络/" href="/categories/网络/"><div class='name'>网络</div><div class='badge'>(1)</div></a></li>
+          <li><a class="flat-box" title="/categories/网络/" href="/categories/网络/"><div class='name'>网络</div><div class='badge'>(2)</div></a></li>
+        
+          <li><a class="flat-box" title="/categories/论文/" href="/categories/论文/"><div class='name'>论文</div><div class='badge'>(3)</div></a></li>
         
           <li><a class="flat-box" title="/categories/设计模式/" href="/categories/设计模式/"><div class='name'>设计模式</div><div class='badge'>(2)</div></a></li>
         

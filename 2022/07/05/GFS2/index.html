@@ -4,8 +4,10 @@
   <meta charset="utf-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   
-  <title>Archives: 2022/7 | Yuren Blog</title>
+  <title>浅析 Google File System（二） | Yuren Blog</title>
   
+  
+  <meta name="description" content="GFS 论文的阅读笔记与思考，包括 write、record append 和 read 操作">
   
 
   
@@ -46,7 +48,7 @@
   
   
   <div class="cover-wrapper">
-    <cover class='cover  half'>
+    <cover class='cover post half'>
       
         
   <h1 class='title'>Yuren's Blog</h1>
@@ -282,24 +284,10 @@
   <div class="l_body">
     <div class='body-wrapper'>
       <div class='l_main'>
-	
-		
-  <section class="post-list">
-    
-      
-        
-          
-        
-          
-        
-      
-    
-    
-      
-        
-          <div class='post-wrapper'>
-            <article class="post reveal ">
   
+
+  <article id="post" class="post white-box article-type-post" itemscope itemprop="blogPost">
+    
 
 
   <section class='meta'>
@@ -308,11 +296,13 @@
     <div class="meta" id="header-meta">
       
         
-  <h2 class="title">
-    <a href="/2022/07/05/GFS2/">
-      浅析 Google File System（二）
-    </a>
-  </h2>
+  
+    <h1 class="title">
+      <a href="/2022/07/05/GFS2/">
+        浅析 Google File System（二）
+      </a>
+    </h1>
+  
 
 
       
@@ -361,6 +351,24 @@
         
           
             
+  
+    <div class="new-meta-item browse busuanzi">
+      <a class='notlink'>
+        <i class="fas fa-eye" aria-hidden="true"></i>
+        <p>
+          <span id="busuanzi_value_page_pv">
+            <i class="fas fa-spinner fa-spin fa-fw" aria-hidden="true"></i>
+          </span>
+        </p>
+      </a>
+    </div>
+  
+
+
+          
+        
+          
+            
 
           
         
@@ -372,132 +380,184 @@
   </section>
 
 
-  <section class="article typo">
-    <div class="article-entry" itemprop="articleBody">
-      GFS 论文的阅读笔记与思考，包括 write、record append 和 read 操作
+    <section class="article typo">
+      <div class="article-entry" itemprop="articleBody">
+        <blockquote>
+<p>论文<a href="https://pdos.csail.mit.edu/6.824/papers/gfs.pdf" target="_blank" rel="noopener">下载</a></p>
+</blockquote>
+<h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><p><a href="/2022/07/03/GFS1">上一篇</a>博客中讨论了 GFS 的部分操作接口，主要聚焦在 Master 和 Client 上。但是对于一个文件系统而言，文件的存储才是其核心的能力，本文将讨论 GFS 的读写接口，包括读写文件的流程以及一致性模型。虽然 GFS 作为一个分布式的文件系统，仅实现了一个非常宽松的一致性模型，但却足以支撑 Google 内部的一些业务。此外，GFS 的一些错误处理在下一篇文章中继续讨论。</p>
+<h1 id="GFS-的一致性模型"><a href="#GFS-的一致性模型" class="headerlink" title="GFS 的一致性模型"></a>GFS 的一致性模型</h1><p>在讨论读写操作前，首先要先介绍一下 GFS 的一致性模型。这里的一致性指 ChunkServer 上的一致性，关于 Master 的一致性在后面的内容中会涉及。</p>
+<p>GFS 定义了两个词，一致的（consistent）和确定的（defined）。具体来说，同一个 chunk 可能会被保存多份，那么如果这些副本中的内容相同，就说这是<strong>一致的</strong>；而如果用户向 chunk 中写入了内容，然后读取时发现内容和写入的一样，就说这是<strong>确定的</strong>。</p>
+<p><strong>一致的</strong>比较好理解，但为什么会有<strong>不确定的</strong>现象呢。这主要在于 GFS 在同一时间可能被多个用户访问，如果用户 A 向 chunk1 中写入内容，那么在他执行读取操作前， chunk1 中的内容是有可能被用户 B 修改的，所以用户 A 读取出来的内容就和写入不一样，也就是不确定。另外，如果用户 A 和用户 B 同时向两个 chunk 中写入内容，也就是 128MB 大小的数据，也可能会出现第一个 chunk 是用户 A 写入的内容，第二个 chunk 是用户 B 写入的内容的情况，或者反过来，这也是不确定的。</p>
+<p>对于 write 和 record append 两个操作，GFS 提供了不同的一致性保证，具体如下表所示：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>write</th>
+<th>record append</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>顺序访问</td>
+<td>defined 且 consistent</td>
+<td>defined 但是有一些 inconsistent 的内容</td>
+</tr>
+<tr>
+<td>并发访问</td>
+<td>undefined 且 consistent</td>
+<td>defined 但是有一些 inconsistent 的内容</td>
+</tr>
+<tr>
+<td>写入失败</td>
+<td>inconsistent</td>
+<td>inconsistent</td>
+</tr>
+</tbody></table>
+<p>光看这张表的话不是很容易理解，下面我们分别针对不同的操作来具体讨论。</p>
+<h1 id="write-操作"><a href="#write-操作" class="headerlink" title="write 操作"></a>write 操作</h1><p>对于一个 chunk 而言，它可能会有多个 replica，分布式系统应该保证 replica 的内容是一致的，这被 GFS 称之为 consistent。从表中 write 的部分可以看到，只要写入成功，那么 GFS 的状态一定是 consistent 的，通常而言，这种一致性需要一个协调者来实现。</p>
+<p>GFS 把这个协调者的任务交给 replica 的其中一个，具体交给谁呢，这取决于 GFS 把租约（lease）下发给谁，拿到租约的 replica 被称为 primary，而其余的 replica 被称为 secondary。按照我的理解，租约可以看作是带时间限制的锁，GFS 把这个时间限制设为 60 秒，这意味着如果一个 replica 拿到了租约，那么通常它在其后的 60 秒内会作为 primary，然后负责协调并发写入时的顺序。为什么说通常是 60 秒呢，因为租约既可以被续租，也可以被提前回收。比如前面提到的 snapshot 操作，就需要回收被复制的目录及其内部所有文件的租约，避免在创建快照的途中发生写入操作造成混乱。</p>
+<p>论文 3.1 小节详细描述了 GFS 读写文件的流程，但是我觉得有一些遗漏。文中以客户端询问 Master 某个 chunk 及其 replica 的位置作为流程的第一步，我认为作为一个文件系统，客户端应该处理的是“在文件 A 的第 X 字节偏移处写入 Y 个字节”这样的语义。所以整个流程的第一步应该是客户端根据 X 的值算出 chunk 的下标和写入位置在 chunk 上的偏移量，由于 chunk 固定为 64 MB，所以这很容易。这样以后，客户端需要的信息就是“文件 A 的第 Z 个 chunk 在哪里”，而这正是 Master 可以提供的服务。</p>
+<p>Master 在返回客户端结果时需要告诉它哪个 replica 是 primary，所以如果此时还没有 primary，那么 Master 会先下发一个租约给某个 chunk，然后再把信息返回给客户端。客户端拿到这些信息后会将它们缓存在本地，下次查询相同的信息时就可以避免再与 Master 交互。3.1 小节中提到客户端仅在 primary 不可访问或它不再拥有租约时才会再次向 Master 获取这些信息，但是 2.4 小节中提到客户端缓存的信息会过期，或 reopen 文件时被清空，所以在这些情况下，客户端同样需要访问 Master 来获取 chunk 的位置信息。</p>
+<p>确定了 primary 和其他 replica 的位置后，客户端就可以向它们所在的 ChunkServer 推送数据了。GFS 采用了一种<strong>流水线式</strong>的传输，即客户端会将数据传输给离它最近的 ChunkServer，而这个 ChunkServer 在接收数据的同时又会将数据发送给另一个 ChunkServer，以此类推，最终达到的效果就是客户端仅需要与一个 ChunkServer 交互，就可以将数据推送给所有与本次传输相关的 ChunkServer。从这里也可以得知，ChunkServer 是有能力知道它上面的某个 chunk 的其他 replica 在哪个 ChunkServer 上的，这可能是客户端在发送数据前告知它的，也可能是它查询了 Master，不论是哪种方式，都需要保证数据传输时不会出现环路，即 A 发给 B，B 发给 C，C 发给 A 的情况。</p>
+<p>ChunkServer 收到来自客户端或其他 ChunkServer 的数据后，会将它们先放在一个内部的 LRU 缓存里，论文中没有解释为什么要用 LRU，根据这种缓存的性质来推测，可能是想尽可能保证热点数据被写入。因为只有缓存中的数据才有机会被写入到 chunk 中，而机器的内存是有限的，所以要尽可能把那些热点的数据放在缓存里，这样即便内存不足，被逐出缓存的也只是那些相对较冷的数据。</p>
+<p>当所有相关的 ChunkServer 都收到了数据后，客户端会发送一个写请求给 primary，这个请求中标识了刚刚传输的数据，也就是可以从前文提到的 LRU 缓存中找出对应的内容。primary 会决定一个执行写入的顺序，然后按这个顺序将 LRU 缓存中的内容写入到对应的 chunk 中，成功后会将这个请求转发给其他的 replica，让它们也将缓存中的内容持久化到 chunk 里。primary 给写入请求做了编号，来保证其他 replica 的写入顺序和自己是一致的，而只要写入顺序是相同的，那么一旦写入成功，最终 chunk 的状态就是一致的，也就是所谓的 consistent。当 primary 收到所有其他 replica 写入成功的消息，它就会回复客户端写入成功。</p>
+<p>这是比较理想的情况，现实里也会存在写入失败的情况，比如可能 LRU 缓存中的内容已经被逐出，那么客户端发送写请求到 primary 时，它就不能根据里面的标识在缓存中找到对应的数据。此外，写入 chunk 时也可能会遇到问题。如果上述操作中的任意环节出现问题，客户端都会认为写入失败。这时 chunk 的内容是不确定的，大概率是不一致的，也就是表中的 inconsistent，GFS 对于这种情况的处理相当简单粗暴，就是重试。</p>
+<h1 id="record-append-操作"><a href="#record-append-操作" class="headerlink" title="record append 操作"></a>record append 操作</h1><p>record append 操作和 write 操作的流程大体类似，论文 3.3 小节中对此作出了一些描述。在机制上，record append 操作和 write 操作的主要区别在于，追加时的文件偏移是由 GFS 决定的，而 write 操作的偏移是由用户决定的。除此之外，追加写入的内容最大只能是 16 MB，原因见下文。</p>
+<p>根据 3.3 中的内容，可以推测客户端会询问 Master 类似“文件 A 的最后一个 chunk 在哪”这样的问题，然后 Master 做和上文所述的同样的操作（也就是下发租约，返回结果）。然后客户端将数据以流水线的形式推送到各个相关的 ChunkServer 上，然后对 primary 发送写请求。这时，如果 primary 发现当前的 chunk 中剩余的空间不足以写入追加的内容，那么会将剩余的空间填充（pad），然后让其余的 replica 也做同样的操作，结束后返回客户端失败，并让它在下一个 chunk 上重试。反之，如果当前 chunk 中剩余的空间可以容纳追加的内容，那么就执行正常的写入流程并保证一致性（即在<strong>同样的偏移处</strong>写入同样的内容，如果因为上一个 record append 操作失败导致 primary 上 chunk 最后的位置是 X，其他 replica 最后的位置是 Y，那么写入时以 X 为准），再返回客户端文件内容在 chunk 上的偏移。由于追加内容最大是 16 MB，所以用于填充剩余空间的部分不会超过 16 MB，也就是说每个 chunk 最多浪费 16 MB 的空间。</p>
+<p>这个流程中可能让人疑惑的点在于为什么客户端要先将数据推送到 ChunkServer 上，再由 ChunkServer 决定是否可以执行写入呢？如果 ChunkServer 决定不能写入，那么刚刚推送的数据就没有任何意义。为什么不先询问 ChunkServer 是否有足够的空间，再决定是否推送数据呢？原因在于，即便先查询的结果是有足够的空间，在传输数据后执行写入时也可能没有足够的空间，因为这中间隔了非常久的时间，而追加操作又是多个客户端并发的，所以在这个时间间隔内可能其他的客户端已经完成了追加操作占满了 chunk 的空间。</p>
+<p>那是否可以让 ChunkServer 为某个客户端预留一块空间，或者让 Master 参与协调将多个客户端的追加操作调度一下呢？这也不行，一方面会增加系统的复杂度，另一方面，即便 GFS 为某个客户端预留了一块空间，客户端也完全可以选择不向里面写入数据，而这块空间又不能被其他客户端使用，这样 chunk 的空间就浪费了。</p>
+<p>从上面的描述中可以发现，GFS 处理 record append 的写入错误也同样使用重试，只不过由于 record append 是在文件的最后一个 chunk 的末尾写入数据，所以第二次重试时写入的位置和第一次已经不一样了。那么多次重试直到某次写入成功，此时整个文件中至少有一个 chunk handle 对应的 chunk，它的某个位置上拥有完整的追加内容，且其他 replica 在这个位置上也有同样的完整的内容。而与之相对，此前的失败追加也会在 chunk 中留下各种不一致的内容，但 GFS 本身保证的就是<strong>至少一次</strong>的原子追加，所以这些不一致是可以容忍的。</p>
+<p>总结来看，record append 中成功的操作会在 chunk 的某个位置上留下完整的内容，且这个内容不会因为其他客户端的并发 record append 操作而被覆盖掉，也就是所谓的确定的（defined），但失败的操作也会在 chunk 中留下一些不一致的内容，也就是所谓的 inconsistent。这就是前文的表中所描述的内容了。</p>
+<h1 id="read-操作"><a href="#read-操作" class="headerlink" title="read 操作"></a>read 操作</h1><p>相较于写入，read 操作就显得非常简单了。首先，客户端想知道“文件 A 的 X～Y 字节偏移处的内容”，那么由于一个 chunk 的大小是固定的 64 MB，客户端就可以根据这个需求计算出 chunk 的下标，然后用文件名和下标来向 Master 查询位置信息。为了减少 IO 的消耗，客户端向 Master 发送的一次请求中可以询问多个 chunk 的信息。</p>
+<p>客户端拿到这个信息后，同样会将它缓存在本地，缓存的过期条件和之前的描述是一样的。客户端寻找一个离它最近的 ChunkServer，然后从那里读取 chunk 中的内容。从上面对 write 操作和 record append 操作的描述中可以得知，chunk 中是存在不一致的内容的，不过这对 Google 而言不是什么问题，因为他们随机读的需求也比较少，像之前讨论的 MapReduce 就是读取了完整的文件，而由于 GFS 的“至少一次”的一致性保证，MapReduce 最终也一定会读取到它需要的内容。</p>
+<p>但是在读取时，整个流程也需要配合 GFS 的错误处理机制，比如前面讨论 record append 时，可以得知文件中会有一些被 GFS 填充的空内容，那么读取时就应该跳过这些内容（可能是按需跳过）。除此之外，由于写入时有可能发生错误（比如比特反转），GFS 在读取时在一定程度上也可以识别到这种错误并作出合理的反应，具体要怎么做就放在下一篇博客中吧。</p>
+
+      </div>
       
-        <div class="readmore">
-          <a href="/2022/07/05/GFS2/" class="flat-box">
-            <i class="fas fa-book-open fa-fw" aria-hidden="true"></i>
-            阅读全文
-          </a>
-        </div>
-      
-    </div>
-    
-  </section>
-</article>
-
-          </div>
+        <br>
         
+
+
+  <section class='meta' id="footer-meta">
+    <div class='new-meta-box'>
       
         
-          <div class='post-wrapper'>
-            <article class="post reveal ">
-  
-
-
-  <section class='meta'>
-    
-    
-    <div class="meta" id="header-meta">
-      
-        
-  <h2 class="title">
-    <a href="/2022/07/03/GFS1/">
-      浅析 Google File System（一）
-    </a>
-  </h2>
-
-
-      
-      <div class='new-meta-box'>
-        
-          
-        
-          
-            
-  <div class='new-meta-item author'>
-    
-      <a href="/" rel="nofollow">
-        
-          <i class="fas fa-user" aria-hidden="true"></i>
-        
-        <p>Yuren</p>
-      </a>
-    
-  </div>
-
-
-          
-        
-          
-            <div class="new-meta-item date">
+          <div class="new-meta-item date" itemprop="dateUpdated" datetime="2022-07-05T03:08:43+08:00">
   <a class='notlink'>
-    <i class="fas fa-calendar-alt" aria-hidden="true"></i>
-    <p>2022-07-03</p>
+    <i class="fas fa-clock" aria-hidden="true"></i>
+    <p>更新于 2022年7月5日</p>
   </a>
 </div>
 
-          
+        
+      
         
           
-            
-  
-  <div class='new-meta-item category'>
-    <a href='/categories/存储/' rel="nofollow">
-      <i class="fas fa-folder-open" aria-hidden="true"></i>
-      <p>分布式&nbsp;/&nbsp;论文&nbsp;/&nbsp;存储</p>
-    </a>
+
+        
+      
+        
+          
+  <div class="new-meta-item share -mob-share-list">
+  <div class="-mob-share-list share-body">
+    
+      
+        <a class="-mob-share-qq" title="QQ好友" rel="external nofollow noopener noreferrer"
+          
+          href="http://connect.qq.com/widget/shareqq/index.html?url=/2022/07/05/GFS2/&title=浅析 Google File System（二） | Yuren Blog&summary="
+          
+          >
+          
+            <img src="https://cdn.jsdelivr.net/gh/xaoxuu/assets@19.1.9/logo/128/qq.png">
+          
+        </a>
+      
+    
+      
+        <a class="-mob-share-qzone" title="QQ空间" rel="external nofollow noopener noreferrer"
+          
+          href="https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=/2022/07/05/GFS2/&title=浅析 Google File System（二） | Yuren Blog&summary="
+          
+          >
+          
+            <img src="https://cdn.jsdelivr.net/gh/xaoxuu/assets@19.1.9/logo/128/qzone.png">
+          
+        </a>
+      
+    
+      
+        <a class="-mob-share-weibo" title="微博" rel="external nofollow noopener noreferrer"
+          
+          href="http://service.weibo.com/share/share.php?url=/2022/07/05/GFS2/&title=浅析 Google File System（二） | Yuren Blog&summary="
+          
+          >
+          
+            <img src="https://cdn.jsdelivr.net/gh/xaoxuu/assets@19.1.9/logo/128/weibo.png">
+          
+        </a>
+      
+    
   </div>
+</div>
 
 
-          
+
         
-          
-            
-
-          
-        
-      </div>
-      
-        <hr>
       
     </div>
   </section>
 
 
-  <section class="article typo">
-    <div class="article-entry" itemprop="articleBody">
-      GFS 论文的阅读笔记与思考，包括概述与部分操作接口
       
-        <div class="readmore">
-          <a href="/2022/07/03/GFS1/" class="flat-box">
-            <i class="fas fa-book-open fa-fw" aria-hidden="true"></i>
-            阅读全文
-          </a>
-        </div>
       
-    </div>
-    
-  </section>
-</article>
-
+          <div class="prev-next">
+              
+              
+                  <section class="next">
+                      <span class="art-item-right" aria-hidden="true">
+                          <h6>下一页&nbsp;<i class="fas fa-chevron-right" aria-hidden="true"></i></h6>
+                          <h4>
+                              <a href="/2022/07/03/GFS1/" rel="prev" title="浅析 Google File System（一）">
+                                  
+                                      浅析 Google File System（一）
+                                  
+                              </a>
+                          </h4>
+                          
+                      </span>
+                  </section>
+              
           </div>
-        
       
-    
-  </section>
-  
-    
-    <!-- 根据主题中的设置决定是否在archive中针对摘要部分的MathJax公式加载mathjax.js文件 -->
-    
-    
+    </section>
+  </article>
+
+
+
+  <!-- 显示推荐文章和评论 -->
+
+
 
   
 
 
-	
+
+
+
+
+<!-- 根据页面mathjax变量决定是否加载MathJax数学公式js -->
+
+
+
+  <script>
+    window.subData = {
+      title: '浅析 Google File System（二）',
+      tools: true
+    }
+  </script>
+
+
 </div>
 <aside class='l_side'>
   
@@ -656,6 +716,28 @@
           
         
       
+        
+          
+          
+        
+          
+          
+        
+          
+          
+        
+      
+        
+          
+          
+        
+          
+          
+        
+          
+          
+        
+      
     
 
   
@@ -709,14 +791,6 @@
   </div>
 </footer>
 <script>setLoadingBarProgress(80);</script>
-
-
-
-
-	<!-- 根据主题中的设置决定是否在archive中针对摘要部分的MathJax公式加载mathjax.js文件 -->
-	
-
-	
 
 
       <script>setLoadingBarProgress(60);</script>
