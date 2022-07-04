@@ -1,7 +1,9 @@
 ---
 title: 浅析批处理框架 MapReduce
 date: 2022-06-23 02:44:06
-categories: 分布式
+categories:
+ - [分布式]
+ - [论文]
 description: MapReduce 论文的阅读笔记与思考
 ---
 

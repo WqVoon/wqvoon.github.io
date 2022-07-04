@@ -1,7 +1,10 @@
 ---
 title: 浅析 Google File System（一）
 date: 2022-07-03 22:02:03
-categories: 分布式
+categories:
+ - [分布式]
+ - [论文]
+ - [存储]
 description: GFS 论文的阅读笔记与思考，包括概述与部分操作接口
 ---
 

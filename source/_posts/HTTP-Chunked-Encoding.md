@@ -2,7 +2,7 @@
 title: 浅谈 Http Chunked Encoding
 date: 2022-05-04 19:55:52
 categories:
- - [前端]
+ - [网络]
  - [Golang]
 description: 一些关于 Chunked Encoding 的想法与实践
 ---
