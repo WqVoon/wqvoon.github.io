@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   
-  <title>函数 Function.prototype.bind 的几个场景 | Yuren Blog</title>
+  <title>浅析 Google File System（三） | Yuren Blog</title>
   
   
-  <meta name="description" content="内容包括：场景的具体内容">
+  <meta name="description" content="GFS 论文的阅读笔记与思考，包括错误处理">
   
 
   
@@ -298,8 +298,8 @@
         
   
     <h1 class="title">
-      <a href="/2020/08/04/FunctionBind/">
-        函数 Function.prototype.bind 的几个场景
+      <a href="/2022/07/05/GFS3/">
+        浅析 Google File System（三）
       </a>
     </h1>
   
@@ -330,7 +330,7 @@
             <div class="new-meta-item date">
   <a class='notlink'>
     <i class="fas fa-calendar-alt" aria-hidden="true"></i>
-    <p>2020-08-04</p>
+    <p>2022-07-05</p>
   </a>
 </div>
 
@@ -340,9 +340,9 @@
             
   
   <div class='new-meta-item category'>
-    <a href='/categories/前端/' rel="nofollow">
+    <a href='/categories/存储/' rel="nofollow">
       <i class="fas fa-folder-open" aria-hidden="true"></i>
-      <p>前端</p>
+      <p>分布式&nbsp;/&nbsp;论文&nbsp;/&nbsp;存储</p>
     </a>
   </div>
 
@@ -382,29 +382,27 @@
 
     <section class="article typo">
       <div class="article-entry" itemprop="articleBody">
-        <h1 id="0x0-前言"><a href="#0x0-前言" class="headerlink" title="0x0 前言"></a>0x0 前言</h1><p>一直以来都没想到 <a href="https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Function/bind" target="_blank" rel="noopener">bind</a> 函数的具体应用场景，最近读某源码时偶然在一个类声明中看到了下面第一个场景中的代码，由此联想到了一些其他内容，这里记录一下</p>
-<h1 id="0x1-第一个场景"><a href="#0x1-第一个场景" class="headerlink" title="0x1 第一个场景"></a>0x1 第一个场景</h1><p>相关的核心代码如下</p>
-<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 类名为 Directive</span></span><br><span class="line"><span class="keyword">this</span>._update = <span class="function"><span class="keyword">function</span> (<span class="params">val</span>) </span>&#123;</span><br><span class="line">  <span class="keyword">this</span>.update(val) <span class="comment">//该方法同样被定义在该类中，用于更新属性，这里因篇幅原因不给出</span></span><br><span class="line">&#125;.bind(<span class="keyword">this</span>)</span><br></pre></td></tr></table></figure>
-
-<p>该方法在这个类之后的代码中被作为回调函数传给了另一个 Watcher 对象，代码如下</p>
-<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">var</span> watcher = <span class="keyword">this</span>._watcher = <span class="keyword">new</span> Watcher(..., <span class="keyword">this</span>._update)</span><br></pre></td></tr></table></figure>
-
-<p>这个 Watcher 对象<strong>将 _update 函数作为一个属性保存在了自己的作用域</strong>中，并在用户触发相应的事件后执行回调。</p>
-<p>这个场景下的本意是 Watcher 在监测到事件发生后调用 Directive._update 方法来更新对应的 Directive 实例中的属性，然而我们知道，Javascript 中的 this 是会根据上下文进行变化的（这里不考虑箭头函数等特殊情况），当 Watcher 把 _update 作为自己的属性时，这个 this 就从 Directive 变成 Watcher 了，之后的更新也都会发生在 Watcher 中，这显然偏离了本意。</p>
-<p>而 bind 的作用在于，它强制绑定了代码中 this 的值，使这个函数在赋值给其他对象作为属性且通过该对象进行调用时依然以 bind 中的参数作为 this ，在这里就达到了场景本身的需求。</p>
-<h1 id="0x2-第二个场景"><a href="#0x2-第二个场景" class="headerlink" title="0x2 第二个场景"></a>0x2 第二个场景</h1><p>上面的例子并不是一个经常会遇到的场景，下面给出一个更普遍一些的情况：假设我们在视图中有一系列按钮通过绑定事件来操作一个 Object 中的属性，由于在 js 的逻辑中也有可能用到同样的属性操作，所以这些操作可以作为该对象的方法，然后将该方法作为回调函数传给对应的 Listener ，代码大概如下</p>
-<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 这段代码因为没有具体上下文所以可能显得有些刻意，不过足够说明问题本身了</span></span><br><span class="line"><span class="keyword">let</span> runTime = <span class="keyword">new</span> (<span class="function"><span class="keyword">function</span>(<span class="params"></span>) </span>&#123;</span><br><span class="line">  <span class="keyword">this</span>.data = <span class="number">0</span></span><br><span class="line">  <span class="keyword">this</span>.addData = <span class="function"><span class="keyword">function</span>(<span class="params"></span>) </span>&#123;</span><br><span class="line">    <span class="keyword">this</span>.data++;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;)();</span><br><span class="line"></span><br><span class="line"><span class="keyword">let</span> btn = <span class="built_in">document</span>.querySelector(<span class="string">'#btn-addData'</span>);</span><br><span class="line">btn.onclick = runTime.addData;</span><br></pre></td></tr></table></figure>
-
-<p>这里试图在点击一个按钮后将 runTime.data 自增，在将回调函数绑定到 click 事件时使用了 <code>btn.onclick = runTime.addData</code> 这样的语句，然而需要注意的是，在绑定后，addData 中的 this 就不再是 runTime ，而是 btn 了，这样在点击后就会尝试递增 btn.data ，从而偏离了本意。</p>
-<p>正确的做法和前面的例子一样，应该在 addData 的函数定义后加入 <code>.bind(this)</code> 语句，从而将 this 强制绑定为 runTime 对象。</p>
-<h1 id="0x3-第三个场景"><a href="#0x3-第三个场景" class="headerlink" title="0x3 第三个场景"></a>0x3 第三个场景</h1><p>另外上面给出的 MDN 的<a href="https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Function/b" target="_blank" rel="noopener">链接</a>中也有几个场景，不过我认为其中受用面最大的应该是 “快捷调用” 的场景，这里为了查阅方便来转述一下</p>
-<p>场景的意图在于给经常调用的长对象方法提供一个捷径，比如想通过 Array.prototype.slice 来将一个类数组对象转换为真正的数组时，常规写法可能是</p>
-<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">var</span> slice = <span class="built_in">Array</span>.prototype.slice</span><br><span class="line">...</span><br><span class="line">slice.apply(<span class="built_in">arguments</span>)</span><br></pre></td></tr></table></figure>
-
-<p>但是当这个函数需要经常被调用时，slice.apply 的写法还是有些令人厌烦，这时可以利用 bind 来将 apply 的 this 绑定为 Array.prototype.slice（这个 this 指的是 “apply 作为谁的方法被调用” 中的 “谁” 而不是 apply 的第一个参数），从而通过直接调用绑定后的函数（包装函数）来达到目的，代码如下</p>
-<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">var</span> slice = <span class="built_in">Function</span>.prototype.apply.bind(<span class="built_in">Array</span>.prototype.slice)</span><br><span class="line">...</span><br><span class="line">slice(<span class="built_in">arguments</span>)</span><br></pre></td></tr></table></figure>
-
-<p>这样就缩短了调用方法时所需的长前缀，写起来就能更愉快一些。</p>
+        <h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><p>前两篇文章主要讨论了 GFS 的架构以及其提供的各种操作的原理，在理想状态下这些组件与功能已经足够上层应用使用了。但是正如论文第 1 节中所描述的，GFS 是工作在上千台普通机器上的分布式系统，所以它应该将“组件会出错”看作是普通事件而不是异常。基于这个理念，GFS 提供了一些机制，以尽可能地减小组件出错对整个系统的影响，本文对此进行讨论。</p>
+<h1 id="Master-的容错"><a href="#Master-的容错" class="headerlink" title="Master 的容错"></a>Master 的容错</h1><p>绝大多数分布式系统都使用 replica 来避免因一个组件或数据发生损坏而影响整个系统，这些 replica 之间通过与 primary（即所有副本中最有发言权的那个）共享一些信息来维持相互之间的一致性，这个共享通常发生在 primary 发生变化时，所以共享的信息就是“发生了什么变化”，具体的形式见下文。传递变化的方式有两种，即同步与异步。</p>
+<p>如果采用同步的方式，那么 primary 的操作就会被拖慢，因为它需要等待所有参与共享的 replica 都收到变化并给出响应后才认为操作完成，但更慢的操作带来的是明确的结果，即 primary 可以得知每个 replica 对这次变化的反应；与之相对的，异步传递变化不会对 primary 的操作有明显的时间影响，但 primary 也很难明确地知道其他 replica 对这次变化的反应。</p>
+<p>正因为这两种共享方式各有利弊，所以 GFS 对 Master 同时应用了它们。具体来说，Master 会将元信息的变化<strong>同步</strong>通知给一些机器，这些机器只负责接受这些信息并保存，在 primary 正常时这些机器上并没有另一个 Master 进程。而一旦 primary 发生故障且不可以通过重启本机 Master 进程来恢复，<strong>监控系统</strong>（这个系统独立于 GFS，也是 Google 内部的一个基础设施）就会在某台此前接收变化的机器上启动一个新的 Master 进程，这个进程在启动后读取之前接收的所有变化，这些变化可以帮助它构建元信息从而变成可以提供服务的状态，此后它将作为 primary 来继续响应客户端的各种请求。</p>
+<p>然而由于每台机器的 IP 都是分配好的，在新的机器上启动 Master 就代表着访问 Master 的 IP 会发生变化，为了避免客户端和 ChunkServer 因此而重启，GFS 中使用 DNS 来访问 Master，而一旦 IP 发生变化，这条 DNS 记录就会被修改，由此也就完成了流量的切换。其实这种使用可控的内部 DNS Server 来向上层屏蔽 IP 变化的理念在很多项目中都有用到（比如 K8S），与之类似的还有 Virtual IP 的概念，非常有趣。</p>
+<p>同步传输可以保证目标机器一定收到了 primary 的变化，而这些变化又可以帮助新的进程达到和曾经的 primary 同样的内部状态，这样的机制已经将 Master 的故障带来的影响降得很低。但是，为了获得一个可用的新的 Master，整个系统要经历原机器上 Master 进程的重启、选择新机器、新机器上启动 Master、新 Master 读取变化恢复状态、修改 DNS 记录、ChunkServer 上报位置信息等一系列操作，这其实是一个非常耗时的过程，而如果整个系统对 Master 仅有这一种容错机制，那就代表着在这么长的恢复时间中，GFS 将处于一个完全不可用的状态（这里不考虑客户端可能有一些缓存信息，使它<strong>暂时不需要</strong>与 Master 交互），这是不可忍受的。</p>
+<p>因此，GFS 提供了一种 Shadow Master 的机制，具体而言，整个集群中除了 primary 外还有一些机器上运行着 Master 进程，primary 在产生变化时将变化信息异步传递给这些机器，运行在这些机器上的 Master 进程就可以 replay 这些变化，从而达到和 primary 同样的状态。如前所述，异步传输会导致一定的延迟，但这种延迟对 GFS 而言是可以接受的，一方面和变化的内容有关，这个在后文会给出解释；另一方面，这些 Shadow Master 是只读的，也就是说它们只能接受来自客户端的读请求，所以异步传输导致的延迟不会让系统变得混乱（因为没有“写”操作），而客户端要想因这个延迟读取错误的内容，首先需要 primary 发生故障，其次 Shadow Master 还没有同步完相关变化，最后读取的部分恰好要在没同步完的区域中，这已经是很小的概率了。</p>
+<p>说了这么多，那么 primary 和其他 replica 究竟同步了什么呢？答案是操作日志，它的原理有点像 InnoDB 存储引擎的 redo 日志，只不过 GFS 的操作日志记录的是元信息的变化。元信息指的就是 Namespace、文件到 chunk handle 的映射以及 chunk 的位置信息，GFS 只记录前两种，最后一种依赖 ChunkServer 的上报。</p>
+<p>GFS 提供的很多操作接口都会让元信息发生变化，而一旦它们发生变化，Master 首先要做的就是将它们的变化写入到操作日志中，然后将它们同步发送给一些备份用机器，再异步发送给运行着 Shadow Master 的机器。无故障地做完这些，Master 才会做实际的动作，并响应客户端的请求。这种“先写日志再做操作”的方式被称为 Write Ahead Log，简称 WAL，是一种被广泛应用在各个知名项目中的技术。</p>
+<p>操作日志的 replay 可以帮助备份的 Master 进入到一个可用的状态，但如果仅靠这个机制还是有一些问题。比如如果持续地对元信息做修改，就会让操作日志越来越大，时间长了这就是一个很大的存储开销。另一方面，如果每次备份 Master 都需要从操作日志的第一条开始 replay，那么当日志非常长时，这个恢复操作就会非常慢。为了解决这个问题，GFS 又实现了 checkpoint 的机制，原理上还是和 InnoDB 类似，其实也是一种被广泛应用于各个项目中的技术。</p>
+<p>具体而言，当操作日志达到一定大小后，GFS 会对 Master 当前的状态做一个 checkpoint，这个 checkpoint 可以快速地让 Master 进入这个确定的状态，论文中的描述是 checkpoint 的组织方式可以快速被映射到 Master 进程的内存空间中。checkpoint 和操作日志一样会被发送到其他机器上供其他 replica 使用。对于一个备份 Master 而言，它在启动时只需要使用最新的 checkpoint 恢复到对应的状态，然后 replay 这个时间点以后的所有操作日志即可，相对于前面提到的从第一条操作日志开始 replay，这种新的方式可以大大减少 Master 的恢复时间。而最新的 checkpoint 之前的所有 checkpoint 与操作日志都可以被删除（当然也可以留着做更好的容错），从而释放出对应的存储空间。</p>
+<h1 id="ChunkServer-的容错"><a href="#ChunkServer-的容错" class="headerlink" title="ChunkServer 的容错"></a>ChunkServer 的容错</h1><p>ChunkServer 的容错表现在当某些 ChunkServer 进程崩溃或其所在的机器损坏时，整个系统依然能够完成对 所有 chunk 的读写操作。在前面的博文中曾提到，这其中最重要的在于 chunk 的 replica。</p>
+<p>replica 之间的一致性由写操作来保证（详见上一篇博文），用户可以对 Namespace 上某个节点的 replica 做配置，也就是可以在文件夹和文件两个等级进行配置，这里的配置主要指数量的配置，而 chunk 的具体位置则由 GFS 来决定。论文 4.2 小节中提到，GFS 会将多个 replica 分布在不同的机架（rack）内的机器上，这样做的好处在于，即便因为一些原因导致某个机架直接不可用，GFS 也可以使用其他机架上的 replica 来提供服务。此外，这种分布方式也可以优化客户端的请求，它可以选择一个离自己最近的机器来完成读写操作。但与之相对的，这种分布也意味着客户端做写操作时，网络流量要垮多个机架，这通常是比较慢的，但正如论文 4.2 小节中所说，这是 Google 作出的一种 trade-off。</p>
+<p>chunk 的位置并不是不变的，它可能因为 ChunkServer 的负载过高而被迁移到其他机器上，这被叫做 Rebalancing。此外，当 ChunkServer 挂掉或 chunk 的某个 replica 不可用（不可用的原因见下文）时，整个集群中可用的 chunk 就与用户的预期不符（比如用户设置了 3 个副本，但因为有 1 个故障，此时可用的副本数为 2），GFS 也会进行 re-replication，这可能会在其他 ChunkServer 上创建副本。反之，如果集群中的副本数量大于用户的配置，GFS 也会对多余的副本进行删除，这也是一种 re-replication。</p>
+<p>这里有一个问题，就是一个 chunk 的所有 replica 是否具有同样的 chunk handle，论文对此并没有给出解释，但我认为在工程上无论是否相同都是可以实现的。而是否相同则会有不同的弊端，如果是相同的，那么用户也许就无法声明大于机器数量的 replica，因为如果机器只有 2 台，而用户声明需要 3 个 replica，那么就一定有一台机器上有两份副本，此时同一台机器上有两个拥有同样 chunk handle 的 chunk，如果不加一个中间层做处理就会有冲突；而如果副本的 chunk handle 是不同的，那么实际可用的 chunk handle 就会变少，因为一个 chunk 的副本就会占用多个 chunk handle。</p>
+<p>那么什么情况下 chunk 的副本会变得不可用呢？在 chunk 过期或者损坏的情况。先说过期，这种现象发生在 secondary chunk 所在的 ChunkServer 短暂的宕机后又重启，而在宕机期间，该 chunk 的其他副本发生了写入操作，此时如果 ChunkServer 恢复，那么这个恢复的 chunk 上的数据就和其他机器上的数据不一致，也就是过期了。为了避免这种情况，GFS 提供了版本号的机制，具体来说，Master 为每个 chunk 维护了一个版本号，在发生写入操作时，这个版本号会增加。所以对于一个 chunk 而言，它的每个副本有一个版本号，Master 也有一个对应于这个 chunk 的版本号，通常情况下它们是相同的，而一旦不同，Master 就以集群中最高的那个为基准（Master 上的版本号可能低于 ChunkServer 上记录的，因为 Master 也会宕机），然后删除掉那些旧的 chunk，再 re-replication 出新的 chunk。此外，由于更新操作会有一些延迟，Master 在发送 chunk 的位置信息时也会发送各个副本对应的版本号，这样客户端就可以主动选择最大的那个，避免读取过期的数据。</p>
+<p>另一方面，chunk 也可能损坏，这主要表现在磁盘可能会出问题导致保存的数据发生变化，或文件系统在写入数据时也可能发生问题等，总之最终的结果就是 chunk 中保存的数据和用户想要写入的不一致，这也可以被看作是一种 undefind。为了尽可能避免这个问题，GFS 提供了 checksum 的机制，具体而言，一个 64MB 的 chunk 会被分成多个 64KB 的块，每个块有一个对应的 32 位的 checksum。在读取一个 chunk 时，ChunkServer 会对读取的内容重新计算 checksum 并与保存的 checksum 做对比，一旦不一致就会回复一个错误给客户端，此时客户端需要从其他 ChunkServer 上读取这个 chunk，而这个异常也会被通知到 Master，使得它可以对这个 chunk 进行 re-replication。</p>
+<p>毫无疑问，这种机制会让 chunk 的读写都受到一定的影响，其中写操作的影响更大一些。由于 Google 内部的追加写操作要远多于随机写，所以 GFS 对追加写操作做了一些优化。先来看普通写，它的作用是“在文件 A 的 X 字节偏移处写入 Y 个字节”，那么写入的这些内容会不同程度地影响 chunk。比如如果写入 64 KB 的内容，那么就可能修改了一个完整的<strong>块</strong>（这个<strong>块</strong>是指与一个 32 位的 checksum 对应的块，不是 chunk，下同），也可能修改了两个连续的块，如果写入大于 64 KB 的内容，就可能修改了两个块或三个块，但一定有一个块是被完全覆写的。因此，GFS 的做法是在被修改的所有 chunk 中选择最开始和最后的两个，读取并验证它们的 checksum，如果是正确的才执行写入，否则要先对这两个 chunk 进行 re-replication，然后才能执行写入。之所以要验证首位的两个块，是因为写入操作会重写内部的 checksum，这样即便那些没有被覆写的区域中有数据损坏的问题也不能被发现了。</p>
+<p>对于追加写来说，GFS 可以<strong>增量地更新</strong>当前最后一个块的 checksum，怎么理解这个增量更新呢，比如编程语言中的 md5 计算，会有类似 <code>md5(&quot;1111&quot;).update(&quot;2222&quot;) == md5(&quot;11112222&quot;)</code> 的规则，增量更新指的应该就是这一点。对于当前文件中的最后一个块而言，它只在没有写满 64KB 的情况下才会被追加内容，否则内容会被追加到下一个块中。而在追加操作前，块的 checksum 计算的是 64KB 中已经写入的部分，在追加操作时只需要 update 新写入的部分即可。这时并不需要读取并验证原来的 checksum 是否正确，因为如果写入原来的内容时预期的内容是 1111，而实际写入的是 1112，上面的等式的左边就是 <code>md5(&quot;1111&quot;).update(&quot;2222&quot;)</code>，右边就是 <code>md5(&quot;11122222&quot;)</code>，它们是不相等的。这样在下次对这个块进行读取时就可以发现问题并作出反应了。</p>
+<p>除了通过主动读取来验证 checksum，当 ChunkServer 处于一个低负载状态时，它也会扫描自己保存的所有 chunk 上的各个块，判断是否出现 checksum 验证不通过的现象，并将这些信息上报给 Master，Master 也会根据这些信息进行 re-replication，从而保证集群中的数据完整。</p>
+<h1 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h1><p>到此为止，我想讨论的 GFS 相关的内容就结束了。为了更好地理解 GFS 的内部机制，我找到了一个 GFS 的简单实现，用 golang 语言开发，在此也把<a href="https://github.com/merrymercy/goGFS" target="_blank" rel="noopener">它</a>分享给各位。</p>
 
       </div>
       
@@ -438,7 +436,7 @@
       
         <a class="-mob-share-qq" title="QQ好友" rel="external nofollow noopener noreferrer"
           
-          href="http://connect.qq.com/widget/shareqq/index.html?url=/2020/08/04/FunctionBind/&title=函数 Function.prototype.bind 的几个场景 | Yuren Blog&summary="
+          href="http://connect.qq.com/widget/shareqq/index.html?url=/2022/07/05/GFS3/&title=浅析 Google File System（三） | Yuren Blog&summary="
           
           >
           
@@ -450,7 +448,7 @@
       
         <a class="-mob-share-qzone" title="QQ空间" rel="external nofollow noopener noreferrer"
           
-          href="https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=/2020/08/04/FunctionBind/&title=函数 Function.prototype.bind 的几个场景 | Yuren Blog&summary="
+          href="https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=/2022/07/05/GFS3/&title=浅析 Google File System（三） | Yuren Blog&summary="
           
           >
           
@@ -462,7 +460,7 @@
       
         <a class="-mob-share-weibo" title="微博" rel="external nofollow noopener noreferrer"
           
-          href="http://service.weibo.com/share/share.php?url=/2020/08/04/FunctionBind/&title=函数 Function.prototype.bind 的几个场景 | Yuren Blog&summary="
+          href="http://service.weibo.com/share/share.php?url=/2022/07/05/GFS3/&title=浅析 Google File System（三） | Yuren Blog&summary="
           
           >
           
@@ -486,28 +484,14 @@
       
           <div class="prev-next">
               
-                  <section class="prev">
-                      <span class="art-item-left">
-                          <h6><i class="fas fa-chevron-left" aria-hidden="true"></i>&nbsp;上一页</h6>
-                          <h4>
-                              <a href="/2020/08/04/CTF-Exercises/" rel="prev" title="CTF练习集">
-                                
-                                    CTF练习集
-                                
-                              </a>
-                          </h4>
-                          
-                      </span>
-                  </section>
-              
               
                   <section class="next">
                       <span class="art-item-right" aria-hidden="true">
                           <h6>下一页&nbsp;<i class="fas fa-chevron-right" aria-hidden="true"></i></h6>
                           <h4>
-                              <a href="/2019/12/11/JS-Inspection/" rel="prev" title="记一段 Js 代码的解读与思考">
+                              <a href="/2022/07/05/GFS2/" rel="prev" title="浅析 Google File System（二）">
                                   
-                                      记一段 Js 代码的解读与思考
+                                      浅析 Google File System（二）
                                   
                               </a>
                           </h4>
@@ -539,7 +523,7 @@
 
   <script>
     window.subData = {
-      title: '函数 Function.prototype.bind 的几个场景',
+      title: '浅析 Google File System（三）',
       tools: true
     }
   </script>
