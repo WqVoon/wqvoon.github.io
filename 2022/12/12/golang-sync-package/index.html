@@ -438,7 +438,17 @@
 <p>所以对于删除这个操作而言，如果被删除的 key 在 readOnly.m 中可以被找到，那么这个删除其实是惰性的，它仅仅只是将 key 对应的值设置为 nil，直到 dirty 发生升级时，readOnly.m 整个被不存在这个 key 的 dirty 替换掉，这个删除才真正发生。在此之前，key 实际是存在于 readOnly.m 中的，只是读取时会 <a href="https://github.com/golang/sync/blob/8fcdb60fdcc0539c5e357b2308249e4e752147f1/syncmap/pre_go19.go#L124-L126" target="_blank" rel="noopener">忽略那些值为 nil 或 expunged 的 key</a>，营造出这个 key 不存在的假象。这在多数情况下不会有什么问题，但如果 key 是很占内存的类型，那这个删除也许并不符合应用的预期。</p>
 <p>除了读写和删除外，syncmap 还支持 LoadOrStore、Range 等操作，原理和前面描述的差不多，其中 Range 操作除了提供遍历功能外，还能够 <a href="https://github.com/golang/sync/blob/8fcdb60fdcc0539c5e357b2308249e4e752147f1/syncmap/pre_go19.go#L318-L323" target="_blank" rel="noopener">加速 dirty 到 readOnly.m 的升级</a>，即只要 readOnly.amended 为 true，也就是 dirty 中存在 readOnly 中不存在的 key 时，就会做 dirty 的升级操作，而不管 Map.miss 是否达到阈值。</p>
 <p>总的来说，syncmap 还是适合多读少写的场景，进一步的，如果是更新原值的写操作也没什么，但如果存在大量的新增 key 的写操作，那 syncmap 的性能其实并不高，因为这些新的 key 都会被放在 dirty 中，而读写 dirty 是要加锁的。除此之外，频繁地增加新的 key 还可能引发多次 dirty 的升级，而每次升级后再增加新的 key 时，都会发生新 dirty 的初始化，这会产生 O(n) 的复杂度，在 k-v 数量很多的情况下会进一步影响应用的性能。</p>
-<h1 id="semaphore"><a href="#semaphore" class="headerlink" title="semaphore"></a>semaphore</h1><p>TBD</p>
+<h1 id="semaphore"><a href="#semaphore" class="headerlink" title="semaphore"></a>semaphore</h1><blockquote>
+<p>源码：<a href="https://github.com/golang/sync/blob/8fcdb60fdcc0539c5e357b2308249e4e752147f1/semaphore/semaphore.go" target="_blank" rel="noopener">https://github.com/golang/sync/blob/8fcdb60fdcc0539c5e357b2308249e4e752147f1/semaphore/semaphore.go</a></p>
+</blockquote>
+<p>semaphore 这个工具我本人并没有使用过，但因为它也被包含在 sync 包中，所以就一起研究下。这个包的代码相较于前面几个而言比较简单，核心的结构体有如下两个：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// Weighted provides a way to bound concurrent access to a resource.</span></span><br><span class="line"><span class="comment">// The callers can request access with a given weight.</span></span><br><span class="line"><span class="keyword">type</span> Weighted <span class="keyword">struct</span> &#123;</span><br><span class="line">	size    <span class="keyword">int64</span></span><br><span class="line">	cur     <span class="keyword">int64</span></span><br><span class="line">	mu      sync.Mutex</span><br><span class="line">	waiters list.List</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">type</span> waiter <span class="keyword">struct</span> &#123;</span><br><span class="line">	n     <span class="keyword">int64</span></span><br><span class="line">	ready <span class="keyword">chan</span>&lt;- <span class="keyword">struct</span>&#123;&#125; <span class="comment">// Closed when semaphore acquired.</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>其中功能函数都是由 Weighted 这个结构来使用的，和前面的三个工具不同，尽管 Weighted 是可导出的，但功能上要求 Weighted.size 字段的值是大于零的，而 size 是不可导出的，所以使用者需要调用 <a href="https://github.com/golang/sync/blob/8fcdb60fdcc0539c5e357b2308249e4e752147f1/semaphore/semaphore.go#L19-L24" target="_blank" rel="noopener">NewWeighted 方法</a> 来创建 Weighted 类型的变量。</p>
+<p>从源码来看，semaphore 想要做的是通过 Weighted 声明可以使用的最大资源量，提供 Weighted.Acquire 方法来获取定量的资源，如果目前没有足够量的资源，那么当前的 goroutine 会以上文 waiter 结构的形式被添加到一个链表里，当有可用资源时，这个 goroutine 就会被唤醒；而之所以会有可用的资源，是因为有些 goroutine 释放了之前申请的资源，这是通过 Weighted.Release 方法来做的。除此之外，该包还提供了 Weighted.TryAcquire 用于无阻塞地申请资源，这个方法和 Weighted.Acquire 的区别在于，当没有足够量的资源时这个函数会立即返回 false 表示资源获取失败，而不是将当前 goroutine 加入到 waiters 链表中。</p>
+<p>为了做到有资源时唤醒 goroutine，每个 waiter 结构都有一个名为 ready 的只写的 channel，我没有看出这里设置成只写是有什么意义，因为 <a href="https://github.com/golang/sync/blob/master/semaphore/semaphore.go#L55" target="_blank" rel="noopener">实际使用时</a> 用的还是一个双向的 channel，当 goroutine 获取不到所需的资源量时，会使用 select 来从这个 channel 中尝试读取数据，以此实现阻塞。而当某个 goroutine 调用 Weighted.Release 释放资源时，会调用 <a href="https://github.com/golang/sync/blob/master/semaphore/semaphore.go#L109-L136" target="_blank" rel="noopener">Weighted.notifyWaiters 方法</a>，按顺序遍历 waiters 链表中的各个 waiter，如果某个 waiter 所需的资源量已经可以获取到了，那么就调用 <code>close(waiter.ready)</code> ，这样对应的 goroutine 中的 select 就会结束，以此实现唤醒。</p>
+<p>semaphore 的核心逻辑到此为止就结束了，但我们还能从中发掘一些其他的信息。首先是如果调用 Weighted.Acquire 时传递了一个比 Weighted.n（即资源的总量）还大的数字，那么 <a href="https://github.com/golang/sync/blob/master/semaphore/semaphore.go#L48-L53" target="_blank" rel="noopener">当前 goroutine 就会陷入阻塞</a>，直到 <code>&lt;-ctx.Done()</code> 返回。但这就对 ctx 有了要求，它不能是 <code>ctx.TODO()</code> 或 <code>ctx.Background()</code>，因为这两个 ctx 的 Done 方法会返回一个 nil，而尝试从一个为 nil 的 channel 中读取数据会导致当前 goroutine 永远陷入阻塞。</p>
+<p>另一方面，Weighted.waiters 是一个链表，而 Weighted.notifyWaiters 方法在被调用时会按序遍历这个链表尝试唤醒，<a href="https://github.com/golang/sync/blob/master/semaphore/semaphore.go#L117-L130" target="_blank" rel="noopener">遇到第一个不能唤醒的 goroutine 时，这个函数就退出了</a>。这会导致什么问题呢？比如目前可用的资源量是 5，waiters 链表中各个 waiter 的 n 依次是 6, 1, 1, 1，实际上这个链表中的后三个 goroutine 都是可以被唤醒的，但因为第一个 goroutine 需要的资源量是 6，就导致后续的 goroutine 不会被扫描。关于这部分，注释中给出的解释是为了效率，因为 semaphore 中使用的链表操作的时间复杂度都是 O(1) 的，而如果使用小顶堆这类的结构，虽然可以尽可能唤醒那些被阻塞的 goroutine，但增删的时间复杂度是不及链表的。</p>
 
       </div>
       
@@ -450,10 +460,10 @@
     <div class='new-meta-box'>
       
         
-          <div class="new-meta-item date" itemprop="dateUpdated" datetime="2022-12-13T01:43:44+08:00">
+          <div class="new-meta-item date" itemprop="dateUpdated" datetime="2022-12-15T00:27:18+08:00">
   <a class='notlink'>
     <i class="fas fa-clock" aria-hidden="true"></i>
-    <p>更新于 2022年12月13日</p>
+    <p>更新于 2022年12月15日</p>
   </a>
 </div>
 
