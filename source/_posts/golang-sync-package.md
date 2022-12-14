@@ -249,4 +249,32 @@ type entry struct {
 
 # semaphore
 
-TBD
+> 源码：https://github.com/golang/sync/blob/8fcdb60fdcc0539c5e357b2308249e4e752147f1/semaphore/semaphore.go
+
+semaphore 这个工具我本人并没有使用过，但因为它也被包含在 sync 包中，所以就一起研究下。这个包的代码相较于前面几个而言比较简单，核心的结构体有如下两个：
+
+```go
+// Weighted provides a way to bound concurrent access to a resource.
+// The callers can request access with a given weight.
+type Weighted struct {
+	size    int64
+	cur     int64
+	mu      sync.Mutex
+	waiters list.List
+}
+
+type waiter struct {
+	n     int64
+	ready chan<- struct{} // Closed when semaphore acquired.
+}
+```
+
+其中功能函数都是由 Weighted 这个结构来使用的，和前面的三个工具不同，尽管 Weighted 是可导出的，但功能上要求 Weighted.size 字段的值是大于零的，而 size 是不可导出的，所以使用者需要调用 [NewWeighted 方法](https://github.com/golang/sync/blob/8fcdb60fdcc0539c5e357b2308249e4e752147f1/semaphore/semaphore.go#L19-L24) 来创建 Weighted 类型的变量。
+
+从源码来看，semaphore 想要做的是通过 Weighted 声明可以使用的最大资源量，提供 Weighted.Acquire 方法来获取定量的资源，如果目前没有足够量的资源，那么当前的 goroutine 会以上文 waiter 结构的形式被添加到一个链表里，当有可用资源时，这个 goroutine 就会被唤醒；而之所以会有可用的资源，是因为有些 goroutine 释放了之前申请的资源，这是通过 Weighted.Release 方法来做的。除此之外，该包还提供了 Weighted.TryAcquire 用于无阻塞地申请资源，这个方法和 Weighted.Acquire 的区别在于，当没有足够量的资源时这个函数会立即返回 false 表示资源获取失败，而不是将当前 goroutine 加入到 waiters 链表中。
+
+为了做到有资源时唤醒 goroutine，每个 waiter 结构都有一个名为 ready 的只写的 channel，我没有看出这里设置成只写是有什么意义，因为 [实际使用时](https://github.com/golang/sync/blob/master/semaphore/semaphore.go#L55) 用的还是一个双向的 channel，当 goroutine 获取不到所需的资源量时，会使用 select 来从这个 channel 中尝试读取数据，以此实现阻塞。而当某个 goroutine 调用 Weighted.Release 释放资源时，会调用 [Weighted.notifyWaiters 方法](https://github.com/golang/sync/blob/master/semaphore/semaphore.go#L109-L136)，按顺序遍历 waiters 链表中的各个 waiter，如果某个 waiter 所需的资源量已经可以获取到了，那么就调用 `close(waiter.ready)` ，这样对应的 goroutine 中的 select 就会结束，以此实现唤醒。
+
+semaphore 的核心逻辑到此为止就结束了，但我们还能从中发掘一些其他的信息。首先是如果调用 Weighted.Acquire 时传递了一个比 Weighted.n（即资源的总量）还大的数字，那么 [当前 goroutine 就会陷入阻塞](https://github.com/golang/sync/blob/master/semaphore/semaphore.go#L48-L53)，直到 `<-ctx.Done()` 返回。但这就对 ctx 有了要求，它不能是 `ctx.TODO()` 或 `ctx.Background()`，因为这两个 ctx 的 Done 方法会返回一个 nil，而尝试从一个为 nil 的 channel 中读取数据会导致当前 goroutine 永远陷入阻塞。
+
+另一方面，Weighted.waiters 是一个链表，而 Weighted.notifyWaiters 方法在被调用时会按序遍历这个链表尝试唤醒，[遇到第一个不能唤醒的 goroutine 时，这个函数就退出了](https://github.com/golang/sync/blob/master/semaphore/semaphore.go#L117-L130)。这会导致什么问题呢？比如目前可用的资源量是 5，waiters 链表中各个 waiter 的 n 依次是 6, 1, 1, 1，实际上这个链表中的后三个 goroutine 都是可以被唤醒的，但因为第一个 goroutine 需要的资源量是 6，就导致后续的 goroutine 不会被扫描。关于这部分，注释中给出的解释是为了效率，因为 semaphore 中使用的链表操作的时间复杂度都是 O(1) 的，而如果使用小顶堆这类的结构，虽然可以尽可能唤醒那些被阻塞的 goroutine，但增删的时间复杂度是不及链表的。
