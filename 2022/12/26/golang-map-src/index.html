@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   
-  <title>函数 Function.prototype.bind 的几个场景 | Hygao Blog</title>
+  <title>浅析 golang1.17.13 map 源码 | Hygao Blog</title>
   
   
-  <meta name="description" content="内容包括：场景的具体内容">
+  <meta name="description" content="分析 map 的部分源码，包括增删改查、扩容以及 for-range 操作">
   
 
   
@@ -298,8 +298,8 @@
         
   
     <h1 class="title">
-      <a href="/2020/08/04/FunctionBind/">
-        函数 Function.prototype.bind 的几个场景
+      <a href="/2022/12/26/golang-map-src/">
+        浅析 golang1.17.13 map 源码
       </a>
     </h1>
   
@@ -330,7 +330,7 @@
             <div class="new-meta-item date">
   <a class='notlink'>
     <i class="fas fa-calendar-alt" aria-hidden="true"></i>
-    <p>2020-08-04</p>
+    <p>2022-12-26</p>
   </a>
 </div>
 
@@ -340,9 +340,9 @@
             
   
   <div class='new-meta-item category'>
-    <a href='/categories/前端/' rel="nofollow">
+    <a href='/categories/Golang/' rel="nofollow">
       <i class="fas fa-folder-open" aria-hidden="true"></i>
-      <p>前端</p>
+      <p>Golang</p>
     </a>
   </div>
 
@@ -382,30 +382,29 @@
 
     <section class="article typo">
       <div class="article-entry" itemprop="articleBody">
-        <h1 id="0x0-前言"><a href="#0x0-前言" class="headerlink" title="0x0 前言"></a>0x0 前言</h1><p>一直以来都没想到 <a href="https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Function/bind" target="_blank" rel="noopener">bind</a> 函数的具体应用场景，最近读某源码时偶然在一个类声明中看到了下面第一个场景中的代码，由此联想到了一些其他内容，这里记录一下</p>
-<h1 id="0x1-第一个场景"><a href="#0x1-第一个场景" class="headerlink" title="0x1 第一个场景"></a>0x1 第一个场景</h1><p>相关的核心代码如下</p>
-<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 类名为 Directive</span></span><br><span class="line"><span class="keyword">this</span>._update = <span class="function"><span class="keyword">function</span> (<span class="params">val</span>) </span>&#123;</span><br><span class="line">  <span class="keyword">this</span>.update(val) <span class="comment">//该方法同样被定义在该类中，用于更新属性，这里因篇幅原因不给出</span></span><br><span class="line">&#125;.bind(<span class="keyword">this</span>)</span><br></pre></td></tr></table></figure>
+        <h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><p>最近阅读了 <a href="https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go" target="_blank" rel="noopener">runtime/map.go</a> 中的代码，以梳理 golang 中 map 这个数据结构的原理。在使用上，map 有很多内置的语法支持，但实际上这些都是 golang 提供的语法糖，这些语法在编译时都会被编译器转换为对 runtime/map.go 或其变种的函数调用，并添加一些代码，最终完成用户需要的功能。</p>
+<p>本文尝试分析 map.go 中的代码对 map 各种操作的支持，其他变种的操作与此类似。</p>
+<h1 id="基础结构"><a href="#基础结构" class="headerlink" title="基础结构"></a>基础结构</h1><p>golang 中 map 的核心结构有如下几个：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// A header for a Go map.</span></span><br><span class="line"><span class="keyword">type</span> hmap <span class="keyword">struct</span> &#123;</span><br><span class="line">  count     <span class="keyword">int</span> <span class="comment">// map 中当前有多少个元素，len() 方法读的就是这里</span></span><br><span class="line">	flags     <span class="keyword">uint8</span> <span class="comment">// 当前 map 的 flag，用于标识 map 的状态，比如是否有在写入或是遍历</span></span><br><span class="line">	B         <span class="keyword">uint8</span>  <span class="comment">// loadFactor * 2^B 是当前 map 可以容纳的元素数量</span></span><br><span class="line">	noverflow <span class="keyword">uint16</span> <span class="comment">// “可能”用了多少个溢出桶</span></span><br><span class="line">	hash0     <span class="keyword">uint32</span> <span class="comment">// hash 函数的种子，引入更多的随机性</span></span><br><span class="line"></span><br><span class="line">	buckets    unsafe.Pointer <span class="comment">// 2^B 个桶，桶也就是 bmap</span></span><br><span class="line">	oldbuckets unsafe.Pointer <span class="comment">// 保存迁移前的桶</span></span><br><span class="line">	nevacuate  <span class="keyword">uintptr</span>        <span class="comment">// 当前有多少个桶被迁移了</span></span><br><span class="line"></span><br><span class="line">	extra *mapextra <span class="comment">// optional fields</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// mapextra holds fields that are not present on all maps.</span></span><br><span class="line"><span class="keyword">type</span> mapextra <span class="keyword">struct</span> &#123;</span><br><span class="line">	<span class="comment">// If both key and elem do not contain pointers and are inline, then we mark bucket</span></span><br><span class="line">	<span class="comment">// type as containing no pointers. This avoids scanning such maps.</span></span><br><span class="line">	<span class="comment">// However, bmap.overflow is a pointer. In order to keep overflow buckets</span></span><br><span class="line">	<span class="comment">// alive, we store pointers to all overflow buckets in hmap.extra.overflow and hmap.extra.oldoverflow.</span></span><br><span class="line">	<span class="comment">// overflow and oldoverflow are only used if key and elem do not contain pointers.</span></span><br><span class="line">	<span class="comment">// overflow contains overflow buckets for hmap.buckets.</span></span><br><span class="line">	<span class="comment">// oldoverflow contains overflow buckets for hmap.oldbuckets.</span></span><br><span class="line">	<span class="comment">// The indirection allows to store a pointer to the slice in hiter.</span></span><br><span class="line">	overflow    *[]*bmap</span><br><span class="line">	oldoverflow *[]*bmap</span><br><span class="line"></span><br><span class="line">	<span class="comment">// nextOverflow holds a pointer to a free overflow bucket.</span></span><br><span class="line">	nextOverflow *bmap</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// A bucket for a Go map.</span></span><br><span class="line"><span class="keyword">type</span> bmap <span class="keyword">struct</span> &#123;</span><br><span class="line">	<span class="comment">// 桶中元素的 hash 的高八位，加速查找，bucketCnt 当前取值为 8</span></span><br><span class="line">	tophash [bucketCnt]<span class="keyword">uint8</span></span><br><span class="line">	<span class="comment">// 后面其实是 key*8 与 value*8，但因为编译前不知道具体类型，所以需要用指针的方式来访问</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
-<p>该方法在这个类之后的代码中被作为回调函数传给了另一个 Watcher 对象，代码如下</p>
-<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">var</span> watcher = <span class="keyword">this</span>._watcher = <span class="keyword">new</span> Watcher(..., <span class="keyword">this</span>._update)</span><br></pre></td></tr></table></figure>
+<p>本质上讲，代码中的一个 map 变量其实是 *hmap 类型，所以如果我们把这三个结构复制到自己的代码里，然后用下面的代码就可以访问 hmap 结构中的各个字段了：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">mp := <span class="keyword">map</span>[<span class="keyword">int</span>]<span class="keyword">int</span>&#123;&#125;</span><br><span class="line"><span class="keyword">for</span> i := <span class="number">0</span>; i &lt; <span class="number">10</span>; i++ &#123;</span><br><span class="line">	mp[i] = i</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">mpPtr := *(**hmap)(unsafe.Pointer(&amp;mp))</span><br><span class="line">fmt.Printf(<span class="string">"%+v\n"</span>, mpPtr)</span><br></pre></td></tr></table></figure>
 
-<p>这个 Watcher 对象<strong>将 _update 函数作为一个属性保存在了自己的作用域</strong>中，并在用户触发相应的事件后执行回调。</p>
-<p>这个场景下的本意是 Watcher 在监测到事件发生后调用 Directive._update 方法来更新对应的 Directive 实例中的属性，然而我们知道，Javascript 中的 this 是会根据上下文进行变化的（这里不考虑箭头函数等特殊情况），当 Watcher 把 _update 作为自己的属性时，这个 this 就从 Directive 变成 Watcher 了，之后的更新也都会发生在 Watcher 中，这显然偏离了本意。</p>
-<p>而 bind 的作用在于，它强制绑定了代码中 this 的值，使这个函数在赋值给其他对象作为属性且通过该对象进行调用时依然以 bind 中的参数作为 this ，在这里就达到了场景本身的需求。</p>
-<h1 id="0x2-第二个场景"><a href="#0x2-第二个场景" class="headerlink" title="0x2 第二个场景"></a>0x2 第二个场景</h1><p>上面的例子并不是一个经常会遇到的场景，下面给出一个更普遍一些的情况：假设我们在视图中有一系列按钮通过绑定事件来操作一个 Object 中的属性，由于在 js 的逻辑中也有可能用到同样的属性操作，所以这些操作可以作为该对象的方法，然后将该方法作为回调函数传给对应的 Listener ，代码大概如下</p>
-<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 这段代码因为没有具体上下文所以可能显得有些刻意，不过足够说明问题本身了</span></span><br><span class="line"><span class="keyword">let</span> runTime = <span class="keyword">new</span> (<span class="function"><span class="keyword">function</span>(<span class="params"></span>) </span>&#123;</span><br><span class="line">  <span class="keyword">this</span>.data = <span class="number">0</span></span><br><span class="line">  <span class="keyword">this</span>.addData = <span class="function"><span class="keyword">function</span>(<span class="params"></span>) </span>&#123;</span><br><span class="line">    <span class="keyword">this</span>.data++;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;)();</span><br><span class="line"></span><br><span class="line"><span class="keyword">let</span> btn = <span class="built_in">document</span>.querySelector(<span class="string">'#btn-addData'</span>);</span><br><span class="line">btn.onclick = runTime.addData;</span><br></pre></td></tr></table></figure>
+<h1 id="基本原理"><a href="#基本原理" class="headerlink" title="基本原理"></a>基本原理</h1><p>对于一个 map 而言，核心需求是能够根据一个 key 来增删改查对应的 value，这需要将 value 保存在槽（hash slot）里，在访问时先对 key 来进行 hash 计算，计算的结果会是一个数字，然后把这个数字对槽的数量取模，这样就可以获知 value 在哪个槽中。但槽的数量是有限的，尽管优秀的 hash 函数能够使计算结果尽可能分散到不同的槽中，当保存的 value 数量大于槽的总数时还是不可避免地会让多个 value 进入同一个槽中，对于这种名为“哈希冲突”的问题，常见的解法是“开放地址法”和“拉链法”。</p>
+<p>golang 中的 map 采用了同样的思路，具体来说，map 中存在 2^B（B 是大于等于 0 的数字） 个 bmap 结构，这些 bmap 被放在一块连续的内存中，也就是一个数组，每个 bmap 中保存 8 个键值对。</p>
+<p>给定一个 key，首先会通过 hash 函数来计算得到一个 uintptr 类型的值（在 64 位的系统上占 8 个字节），然后将这个值与 <code>2^B - 1</code> 做与运算，就可以得到 bmap 数组的下标。这里的与运算其实是前文取模的一种优化，因为 bmap 的数量是 2 的整数次幂，那么这个值减一就会得到一个低 B 位均为 1 的数，这时对这个数做与运算时就可以拿到 [0, 2^B) 中的一个值。</p>
+<p>而 bmap 中首先的 8 个字节是名为 tophash 的数组，与其内部的键值对一一对应。这个值的计算方式被定义在 <a href="https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=193-200" target="_blank" rel="noopener">tophash 函数</a> 中，取的是 hash 函数结果的高 8 位，但由于<a href="https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=88-97" target="_blank" rel="noopener">部分值被保留用于标识一些状态</a>，所以需要按需绕过这些值。有了这些 tophash，就可以在读取时先对比 tophash，当且仅当 bmap 中某个 tophash 的值与入参对应的 tophash 相等时再进一步比较对应的 key 与入参的 key 是否相等，这就避免了一些复杂结构的频繁判等。</p>
+<p>而 bmap 结构本身其实并不单单是前文贴出的代码中的样子，它除了 8 个 tophash 外还包含 8 个 key、8 个对应的 value 以及一个 bmap 的指针。在运行时会为每一个 bmap 分配 <code>8 + 8*sizeof(key) + 8*sizeof(value) + sizeof(uintptr)</code> 大小的内存，从这个算式中可以发现，sizeof(key) 和 sizeof(value) 都是仅在编译时才能确定的，所以 bmap 本身的结构中仅包含 tophash，其他三个字段都是在运行时直接通过指针来访问的。为了验证这一点，我们可以为上面的 bmap 结构按实际情况填充一些字段，然后就可以用下面的代码来访问这个 bmap 中的各个值了：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// ... 省略 hmap 和 mapextra 结构</span></span><br><span class="line"><span class="keyword">type</span> bmap <span class="keyword">struct</span> &#123;</span><br><span class="line">  <span class="comment">// bucketCnt 取值为 8</span></span><br><span class="line">	tophash [bucketCnt]<span class="keyword">uint8</span></span><br><span class="line"></span><br><span class="line">	<span class="comment">// 填充具体的 keys、values 以及 ptr</span></span><br><span class="line">	keys [bucketCnt]<span class="keyword">string</span></span><br><span class="line">	vals [bucketCnt]<span class="keyword">string</span></span><br><span class="line">	ptr  *bmap</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line">	mp := <span class="keyword">map</span>[<span class="keyword">string</span>]<span class="keyword">string</span>&#123;</span><br><span class="line">		<span class="string">"hello"</span>: <span class="string">"world"</span>,</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	mpPtr := *(**hmap)(unsafe.Pointer(&amp;mp))</span><br><span class="line">	fmt.Println(<span class="string">"len:"</span>, mpPtr.count)</span><br><span class="line"></span><br><span class="line">	bucket := (*bmap)(mpPtr.buckets)</span><br><span class="line">	fmt.Printf(<span class="string">"%+v\n"</span>, bucket)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
-<p>这里试图在点击一个按钮后将 runTime.data 自增，在将回调函数绑定到 click 事件时使用了 <code>btn.onclick = runTime.addData</code> 这样的语句，然而需要注意的是，在绑定后，addData 中的 this 就不再是 runTime ，而是 btn 了，这样在点击后就会尝试递增 btn.data ，从而偏离了本意。</p>
-<p>正确的做法和前面的例子一样，应该在 addData 的函数定义后加入 <code>.bind(this)</code> 语句，从而将 this 强制绑定为 runTime 对象。</p>
-<h1 id="0x3-第三个场景"><a href="#0x3-第三个场景" class="headerlink" title="0x3 第三个场景"></a>0x3 第三个场景</h1><p>另外上面给出的 MDN 的<a href="https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Function/b" target="_blank" rel="noopener">链接</a>中也有几个场景，不过我认为其中受用面最大的应该是 “快捷调用” 的场景，这里为了查阅方便来转述一下</p>
-<p>场景的意图在于给经常调用的长对象方法提供一个捷径，比如想通过 Array.prototype.slice 来将一个类数组对象转换为真正的数组时，常规写法可能是</p>
-<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">var</span> slice = <span class="built_in">Array</span>.prototype.slice</span><br><span class="line">...</span><br><span class="line">slice.apply(<span class="built_in">arguments</span>)</span><br></pre></td></tr></table></figure>
-
-<p>但是当这个函数需要经常被调用时，slice.apply 的写法还是有些令人厌烦，这时可以利用 bind 来将 apply 的 this 绑定为 Array.prototype.slice（这个 this 指的是 “apply 作为谁的方法被调用” 中的 “谁” 而不是 apply 的第一个参数），从而通过直接调用绑定后的函数（包装函数）来达到目的，代码如下</p>
-<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">var</span> slice = <span class="built_in">Function</span>.prototype.apply.bind(<span class="built_in">Array</span>.prototype.slice)</span><br><span class="line">...</span><br><span class="line">slice(<span class="built_in">arguments</span>)</span><br></pre></td></tr></table></figure>
-
-<p>这样就缩短了调用方法时所需的长前缀，写起来就能更愉快一些。</p>
-
+<p>也就是说，bmap 中的 key 和 value 都是值类型，这也符合 golang 一贯的做法。</p>
+<p>那么这个 ptr，就是是结尾的 bmap 指针是用来做什么的呢？这是用来链接溢出桶（overflow bucket）的。具体而言，golang 中的 map 是采用“拉链法”来解决 hash 冲突的，而这里的 ptr 是用来实现拉链的。如前所述，一个 bmap 只能保存 8 个键值对，而且这 8 个键值对 <code>hash(key) &amp; (2^B - 1)</code> 的值是相等的（也就是当前 bmap 的下标）。那么如果此时有一个 bmap，它内部已经拥有了 8 个键值对，此时新增的第 9 个 key 算出的下标和这个已有 8 个键值对的 bmap 下标相同，就需要在这个 bmap 后面添加新的 bmap 结构才能将这个键值对保存下来。此时原有的 bmap 中的 ptr 就会指向这个新的 bmap 结构。</p>
+<p>虽然拉链法能够在存储上解决哈希冲突的问题，但任由拉链越来越长会严重影响 map 的访问效率，极端情况下会退化成链表。会造成这个问题，本质在于 bmap 的数量会限制 hash 函数的值范围（因为会对数量减一取模），较小的值范围会让更多的 hash(key) 落在同一个桶中。所以就需要在 map 中保存的值达到一定数量时对 map 做扩容，通过增加 bmap 的数量来为 hash 函数提供更大的值范围。那么怎样确定这个数量呢？是通过 <a href="https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=1070-1072" target="_blank" rel="noopener">overLoadFactor 函数</a> 来确定的，具体而言，当 hmap.count 大于一个 bmap 中能保存的数量时，需要判断 <code>hmap.count / 2^B</code> 是否大于 6.5，这里的 6.5 被称为负载因子（load factor），当比值大于这个值时，overLoadFactor 返回 true，此时就需要进行扩容（其实扩容的条件不止负载因子这一个，详细的内容放在下面的小节中）。</p>
+<p>扩容的操作就是创建一个新的 bmap 数组，这个数组要在数学上更适应当前键值对的数量，然后把键值对从旧的 bmap 数组中迁移到新的数组中。不难想到，当 map 中的键值对数量很多时，这个操作会非常耗性能。所以 golang 的 map 采用了“渐进式扩容”的方式，将扩容操作分摊到每一次的写入和删除操作中，每次只迁移一部分的数据。这样解决了全量扩容带来的瞬间性能问题，但却引入了迁移中间态，也就是在某些时间点，map 有一部分数据在新的 bmap 数组，有一部分还留在旧的数组中，所以在读取时就需要兼容这一点，具体的方式在下面的内容中会讨论到。</p>
+<p>总结而言，golang 中的 map 用 hmap 来保存多个 bmap，而具体的键值对被保存在 bmap 中，每个 bmap 对应 hash 函数的一个结果，当某个 bmap 中的键值对满了但需要在这个 bmap 中新增键值对时，会通过“拉链法”在 bmap 之后链接一个新的 bmap 结构。而为了保证 map 的访问效率，还需要适时对 map 进行渐进式的扩容。</p>
+<p>那么下面我们就来通过源码了解一下各个操作的具体逻辑。</p>
+<h1 id="初始化"><a href="#初始化" class="headerlink" title="初始化"></a>初始化</h1><h1 id="写入"><a href="#写入" class="headerlink" title="写入"></a>写入</h1><h1 id="读取"><a href="#读取" class="headerlink" title="读取"></a>读取</h1><h1 id="删除"><a href="#删除" class="headerlink" title="删除"></a>删除</h1><h1 id="扩容"><a href="#扩容" class="headerlink" title="扩容"></a>扩容</h1><p>6.5 的负载因子才能保证增量扩容只扩大一倍</p>
+<h1 id="遍历"><a href="#遍历" class="headerlink" title="遍历"></a>遍历</h1>
       </div>
       
         <br>
@@ -438,7 +437,7 @@
       
         <a class="-mob-share-qq" title="QQ好友" rel="external nofollow noopener noreferrer"
           
-          href="http://connect.qq.com/widget/shareqq/index.html?url=/2020/08/04/FunctionBind/&title=函数 Function.prototype.bind 的几个场景 | Hygao Blog&summary="
+          href="http://connect.qq.com/widget/shareqq/index.html?url=/2022/12/26/golang-map-src/&title=浅析 golang1.17.13 map 源码 | Hygao Blog&summary="
           
           >
           
@@ -450,7 +449,7 @@
       
         <a class="-mob-share-qzone" title="QQ空间" rel="external nofollow noopener noreferrer"
           
-          href="https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=/2020/08/04/FunctionBind/&title=函数 Function.prototype.bind 的几个场景 | Hygao Blog&summary="
+          href="https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=/2022/12/26/golang-map-src/&title=浅析 golang1.17.13 map 源码 | Hygao Blog&summary="
           
           >
           
@@ -462,7 +461,7 @@
       
         <a class="-mob-share-weibo" title="微博" rel="external nofollow noopener noreferrer"
           
-          href="http://service.weibo.com/share/share.php?url=/2020/08/04/FunctionBind/&title=函数 Function.prototype.bind 的几个场景 | Hygao Blog&summary="
+          href="http://service.weibo.com/share/share.php?url=/2022/12/26/golang-map-src/&title=浅析 golang1.17.13 map 源码 | Hygao Blog&summary="
           
           >
           
@@ -486,28 +485,14 @@
       
           <div class="prev-next">
               
-                  <section class="prev">
-                      <span class="art-item-left">
-                          <h6><i class="fas fa-chevron-left" aria-hidden="true"></i>&nbsp;上一页</h6>
-                          <h4>
-                              <a href="/2020/08/04/CTF-Exercises/" rel="prev" title="CTF练习集">
-                                
-                                    CTF练习集
-                                
-                              </a>
-                          </h4>
-                          
-                      </span>
-                  </section>
-              
               
                   <section class="next">
                       <span class="art-item-right" aria-hidden="true">
                           <h6>下一页&nbsp;<i class="fas fa-chevron-right" aria-hidden="true"></i></h6>
                           <h4>
-                              <a href="/2019/12/11/JS-Inspection/" rel="prev" title="记一段 Js 代码的解读与思考">
+                              <a href="/2022/12/12/golang-sync-package/" rel="prev" title="golang x/sync 包源码解读">
                                   
-                                      记一段 Js 代码的解读与思考
+                                      golang x/sync 包源码解读
                                   
                               </a>
                           </h4>
@@ -539,7 +524,7 @@
 
   <script>
     window.subData = {
-      title: '函数 Function.prototype.bind 的几个场景',
+      title: '浅析 golang1.17.13 map 源码',
       tools: true
     }
   </script>
