@@ -1,9 +1,9 @@
 ---
-title: 浅析 golang1.17.13 map 源码
+title: 浅析 golang map 源码
 date: 2022-12-26 22:32:34
 categories:
  - [Golang]
-description: 分析 map 的部分源码，包括增删改查、扩容以及 for-range 操作
+description: 分析 1.17.13 版本 map 的部分源码，包括增删改查、for-range 以及扩容操作
 ---
 
 # 前言
@@ -75,11 +75,11 @@ type bmap struct {
 
 golang 中的 map 采用了同样的思路，具体来说，map 中存在 2^B（B 是大于等于 0 的数字） 个 bmap 结构，这些 bmap 被放在一块连续的内存中，也就是一个数组，每个 bmap 中保存 8 个键值对。
 
-给定一个 key，首先会通过 hash 函数来计算得到一个 uintptr 类型的值（在 64 位的系统上占 8 个字节），然后将这个值与 `2^B - 1` 做与运算，就可以得到 bmap 数组的下标。这里的与运算其实是前文取模的一种优化，因为 bmap 的数量是 2 的整数次幂，那么这个值减一就会得到一个低 B 位均为 1 的数，这时对这个数做与运算时就可以拿到 [0, 2^B) 中的一个值。
+给定一个 key，首先会通过 hash 函数来计算得到一个 uintptr 类型的值（在 64 位的系统上占 8 个字节），然后将这个值与 `2^B - 1` 做与运算，就可以得到 bmap 数组的下标。这里的与运算其实是前文取模的一种优化，因为 bmap 的数量是 2 的整数次幂，那么这个值减一就会得到一个低 B 位均为 1 的数，这时对这个数做与运算时就可以拿到 [0, 2^B) 中的一个值，而这个值的取值范围与 bmap 数组的下标范围相同。
 
-而 bmap 中首先的 8 个字节是名为 tophash 的数组，与其内部的键值对一一对应。这个值的计算方式被定义在 [tophash 函数](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=193-200) 中，取的是 hash 函数结果的高 8 位，但由于[部分值被保留用于标识一些状态](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=88-97)，所以需要按需绕过这些值。有了这些 tophash，就可以在读取时先对比 tophash，当且仅当 bmap 中某个 tophash 的值与入参对应的 tophash 相等时再进一步比较对应的 key 与入参的 key 是否相等，这就避免了一些复杂结构的频繁判等。
+而 bmap 中首先的 8 个字节是名为 tophash 的数组，与其内部的键值对一一对应。这个值的计算方式被定义在 [tophash 函数](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=193-200) 中，取的是 hash 函数结果的高 8 位，但由于 [部分值被保留用于标识一些状态](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=88-97)，所以需要按需绕过这些值。有了这些 tophash，就可以在读取时先对比 tophash，当且仅当 bmap 中某个 tophash 的值与入参对应的 tophash 相等时再进一步比较对应的 key 与入参的 key 是否相等，这就避免了一些复杂结构的频繁判等。
 
-而 bmap 结构本身其实并不单单是前文贴出的代码中的样子，它除了 8 个 tophash 外还包含 8 个 key、8 个对应的 value 以及一个 bmap 的指针。在运行时会为每一个 bmap 分配 `8 + 8*sizeof(key) + 8*sizeof(value) + sizeof(uintptr)` 大小的内存，从这个算式中可以发现，sizeof(key) 和 sizeof(value) 都是仅在编译时才能确定的，所以 bmap 本身的结构中仅包含 tophash，其他三个字段都是在运行时直接通过指针来访问的。为了验证这一点，我们可以为上面的 bmap 结构按实际情况填充一些字段，然后就可以用下面的代码来访问这个 bmap 中的各个值了：
+而 bmap 结构本身其实并不单单是前文贴出的代码中的样子，它除了 8 个 tophash 外还包含 8 个 key、8 个对应的 value 以及一个 bmap 的指针。在不考虑内存对齐的情况下，golang 在运行时会为每一个 bmap 分配 `8 + 8*sizeof(key) + 8*sizeof(value) + sizeof(uintptr)` 大小的内存，从这个算式中可以发现，sizeof(key) 和 sizeof(value) 都是仅在编译时才能确定的，所以 bmap 本身的结构中仅包含 tophash，其他三个字段都是在运行时直接通过指针来访问的。为了验证这一点，我们可以为上面的 bmap 结构按实际情况填充一些字段，然后就可以用下面的代码来访问这个 bmap 中的各个值了：
 
 ```go
 // ... 省略 hmap 和 mapextra 结构
@@ -113,9 +113,9 @@ func main() {
 
 所以，hmap.buckets 其实可以看作是一个二维的 bmap 数组，第一维的下标通过哈希函数加与运算的方式来获取，而第二维则是一个链表，链表中所有 key 的 `hash(key) & (2^B - 1)` 的值都是相同的。在读写 bmap 时，首先计算出第一维的下标，然后遍历这个下标对应的链表，在链表的某个节点上做具体的增删改查。
 
-虽然拉链法能够在存储上解决哈希冲突的问题，但任由拉链越来越长会严重影响 map 的访问效率，极端情况下会退化成一条链表（写入的所有 key 计算出的下标都相同）。而之所以会造成这个问题，本质在于 bmap 的数量会限制 hash 函数的值范围（因为会对数量减一取模），较小的值范围会让更多的 hash(key) 落在同一个桶中。所以就需要在 map 中保存的值达到一定数量时对 map 做扩容，通过增加 bmap 的数量来为 hash 函数提供更大的值范围。那么怎样确定这个数量呢？是通过 [overLoadFactor 函数](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=1070-1072) 来确定的，具体而言，当 hmap.count 大于一个 bmap 中能保存的数量时，需要判断 `hmap.count / 2^B` 是否大于 6.5，这里的 6.5 被称为负载因子（load factor），当比值大于这个值时，overLoadFactor 返回 true，此时就需要进行扩容（其实扩容的条件不止负载因子这一个，详细的内容放在下面的小节中）。
+虽然拉链法能够在存储上解决哈希冲突的问题，但任由拉链越来越长会严重影响 map 的访问效率，极端情况下会退化成一条链表（写入的所有 key 计算出的下标都相同）。而之所以会造成这个问题，本质在于 bmap 的数量会限制 hash 函数的值范围（因为会对数量取模），较小的值范围会让更多的 hash(key) 落在同一个桶中。所以就需要在 map 中保存的值达到一定数量时对 map 做扩容，通过增加 bmap 的数量来为 hash 函数提供更大的值范围。那么怎样确定这个数量呢？是通过 [overLoadFactor 函数](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=1070-1072) 来确定的，具体而言，当 hmap.count 大于一个 bmap 中能保存的数量时，需要判断 `hmap.count / 2^B` 是否大于 6.5，这里的 6.5 被称为负载因子（load factor），当比值大于这个值时，overLoadFactor 返回 true，此时就需要进行扩容（其实扩容的条件不止负载因子这一个，详细的内容放在下面的小节中）。
 
-扩容的操作就是创建一个新的 bmap 数组，这个数组要在数学上更适应当前键值对的数量，然后把键值对从旧的 bmap 数组中迁移到新的数组中。不难想到，当 map 中的键值对数量很多时，这个操作会非常耗性能。所以 golang 的 map 采用了“渐进式扩容”的方式，将扩容操作分摊到每一次的写入和删除操作中，每次只迁移一部分的数据。这样解决了全量扩容带来的瞬间性能问题，但却引入了迁移中间态，也就是在某些时间点，map 有一部分数据在新的 bmap 数组，有一部分还留在旧的数组中，所以在读取时就需要兼容这一点，具体的方式在下面的内容中会讨论到。
+扩容的操作就是创建一个新的 bmap 数组，这个数组要在数学意义上更适应当前键值对的数量，然后把键值对从旧的 bmap 数组中迁移到新的数组中。不难想到，当 map 中的键值对数量很多时，这个操作会非常耗性能。所以 golang 的 map 采用了“渐进式扩容”的方式，将扩容操作分摊到每一次的写入和删除操作中，每次只迁移一部分的数据。这样解决了全量扩容带来的瞬间性能问题，但却引入了迁移中间态，也就是在某些时间点，map 有一部分数据在新的 bmap 数组，有一部分还留在旧的数组中，所以在读写时就需要兼容这一点，具体的方式在下面的内容中会讨论到。
 
 总结而言，golang 中的 map 用 hmap 来保存多个 bmap，而具体的键值对被保存在 bmap 中，每个 bmap 对应 hash 函数的一个结果，当某个 bmap 中的键值对满了但需要在这个 bmap 中新增键值对时，会通过“拉链法”在 bmap 之后链接一个新的 bmap 结构。而为了保证 map 的访问效率，还需要适时对 map 进行渐进式的扩容。
 
@@ -192,7 +192,7 @@ for ; hit.key != nil; mapiternext(&hit) {
 
 上面代码中 for 循环内部的 key 和 val 是与 for-range 等式左边的变量一一对应的，所以如果只有 key 的话那么 for 循环内部也只有 key，没有变量时情况与此类似。
 
-继续分析上面生成的代码，核心在于 hiter 类似以及 [mapiterinit 函数](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=798-849) 与 [mapiternext 函数](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=851-975)，先看一下 hiter 类型的定义，这里给出各个字段的注释，在两个功能函数中会用到它们：
+继续分析上面生成的代码，核心在于 hiter 类型以及 [mapiterinit 函数](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=798-849) 与 [mapiternext 函数](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=851-975)，先看一下 hiter 类型的定义，这里给出各个字段的注释，在两个功能函数中会用到它们：
 
 ```go
 type hiter struct {
@@ -214,11 +214,11 @@ type hiter struct {
 }
 ```
 
-然后继续看上面的 for 循环，为了保证第一次循环时 hit 中已经有 key 和 val 了，可以猜测 mapiterinit 内部或者直接对 key 和 val 进行了赋值，要么调用了 mapiterinit，从代码中可以看到是 [后者](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=848)。下面就一一分析一下这两个函数。
+然后继续看上面的 for 循环，为了保证第一次循环时 hit 中已经有 key 和 val 了，可以猜测 mapiterinit 内部或者直接对 key 和 val 进行了赋值，或者调用了 mapiterinit，从代码中可以看到是 [后者](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=848)。下面就一一分析一下这两个函数。
 
 首先来看 mapiterinit，在函数的开始判断了 hmap.count 是否为 0，如果为 0 那么直接 return，此时 hiter 的 key 和 elem 字段都是 nil，回到上面被编译器生成的代码中，可以发现如果 key 为 nil，那么整个 for-range 就会结束。
 
-然后，mapiterinit 会根据入参来填充 hinter 中的各个字段，其中 startBucket 和 offset 是随机选择的，这两个字段用于指引 mapiternext 从哪里开始遍历键值对，正是因为在这里引入了随机性，所以每次遍历同一个 map 得到的键值对顺序都可能是不同的。反过来说，如果把 startBucket 和 offset 都设置成 0，然后构建一个长度为 8 的 map，那么每次遍历拿到的键值对序列都会相同。
+然后，mapiterinit 会根据入参来填充 hiter 中的各个字段，其中 startBucket 和 offset 是随机选择的，这两个字段用于指引 mapiternext 从哪里开始遍历键值对，正是因为在这里引入了随机性，所以每次遍历同一个 map 得到的键值对顺序都可能是不同的。反过来说，如果把 startBucket 和 offset 都设置成 0，然后构建一个长度为 8 的 map，那么每次遍历拿到的键值对序列都会相同。
 
 在 mapiterinit 的最后会给 hmap.flags 设置 iterator 和 oldIterator 两个标记位，然后进一步调用 mapiternext，尝试填充 key 和 elem 两个字段，第一次调用 mapiternext 时，一定会拿到一对不为 nil 的键值对。
 
@@ -236,7 +236,7 @@ map 的 for-range 也被认为是一种读操作，所以 mapiternext 的一开�
 
 正如前面在基本原理中讨论的，map 的扩容是渐进式的，会被分摊到各次的写操作中，且因为引入了“扩容中”的状态，所以读操作也要对它做一些兼容。
 
-扩容操作的触发点在 [mapassign 函数中](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=645-650)，如前所述，就是对 map 进行赋值时。[hmap.growing 函数](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=1089-1092) 是一个谓词函数，通过判断 hmap.oldbuckets 是否为 nil 来获知当前的 map 是否在扩容中，如果没有在扩容，且新增一个 key 后不满足负载因子的条件或有太多的溢出桶，那么就会调用 [hashGrow 函数](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=1026-1067) 进行扩容，扩容后会用 `goto again` 重新执行 mapassign 的逻辑。下面我们就一起来看下 hashGrow 这个函数的代码，然后再看看执行过这个函数后 mapassign 的流程会有什么不同。
+扩容操作的触发点在 [mapassign 函数中](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=645-650)，如前所述，就是对 map 进行赋值时，更具体来说是向 map 中增加新的键值对时。[hmap.growing 函数](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=1089-1092) 是一个谓词函数，通过判断 hmap.oldbuckets 是否为 nil 来获知当前的 map 是否在扩容中，如果没有在扩容，且新增一个 key 后不满足负载因子的条件或有太多的溢出桶，那么就会调用 [hashGrow 函数](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=1026-1067) 进行扩容，扩容后会用 `goto again` 重新执行 mapassign 的逻辑。下面我们就一起来看下 hashGrow 这个函数的代码，然后再看看执行过这个函数后 mapassign 的流程会有什么不同。
 
 hashGrow 首先区分了扩容的触发原因，如果是因为有太多的溢出桶，那么会分配与原来长度相同的新的 bmap 数组，并设置 hmap.flags 的 sameSizeGrow 标记位，否则会创建原来两倍大小的 bmap 数组。然后判断 hmap.flags 是否设置过 iterator 标记位，这个标记是在 for-range 的 mapiterinit 函数中设置的，如果设置过，那么清除 iterator，只保留 oldIterator。在这之后，将新的状态更新到 hmap 中，包括新的 B、新的 flags ，更重要的，旧的 bmap 数组会被赋值给 hmap.oldbuckets 中，而 hmap.buckets 会保存新申请的 bmap 数组，虽然此时所有的键值对都在旧数组中。
 
@@ -256,6 +256,6 @@ evacuate 的代码虽然比较长，但是核心逻辑也很简单，如果传�
 
 另一个读操作是 map 的遍历，具体的逻辑在 mapiternext 函数中。由于“在遍历 map 的过程中向其写入新的键值对”这个行为是不确定的，而 hmap 的扩容只会发生在 mapassign 新增键值对时，所以如果要考虑 for-range 与扩容的关系，那么正常情况下只会有 map 处于扩容中的时候对其进行 for-range，而不会有 for-range 的过程中开始扩容。对于这种情况，mapiternext 的处理与 mapaccess2 类似，如果当前遍历的 bmap 链表没有完成迁移，那么去遍历迁移前的 bmap 链表，如果已经完成迁移，那么直接遍历新的 bmap 链表。
 
-但由于 for-range 最终会遍历整个 map，所以如果在非 sameSizeGrow 的情况下单纯用这种方式是会有问题的，因为比如扩容前有 2 个 bmap 链表，扩容后有 4 个，那么 0 和 3 都对应原来的 0 号链表，而遍历后会分别扫过 0 和 3，如果判断原来的 0 没有做迁移，那么就会遍历两次 0 号链表，最终的结果就是部分键值对会出现两次。所以，mapiternext 在遍历时以新的 bmap 数组为准，假设当前遍历的下标为 a，那么如果对应的旧 bmap 链表还没有迁移，就会去遍历旧链表，然后 [只返回那些迁移时会被移动到 a 中的键值对](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=911-924)，下次遍历这个旧链表时再返回剩余的部分。
+但由于 for-range 最终会遍历整个 map，所以如果在非 sameSizeGrow 的情况下单纯用这种方式是会有问题的，因为比如扩容前有 2 个 bmap 链表，扩容后有 4 个，那么 0 和 3 都对应原来的 0 号链表，而遍历后会分别扫过 0 和 3，如果判断原来的 0 没有做迁移，那么就会遍历两次 0 号链表，最终的结果就是部分键值对会出现两次。所以，mapiternext 在遍历时以新的 bmap 数组为准，假设当前遍历的新 bmap 链表为 a，那么如果对应的旧 bmap 链表还没有迁移，就会去遍历旧链表，然后 [只返回那些迁移时会被移动到 a 中的键值对](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=911-924)，下次遍历这个旧链表时再返回剩余的部分。
 
 另外，和新增键值对不同，修改已有的键或删除某个键是被允许的，而这虽然不会引起扩容，但是会导致迁移。也就是说，有可能两次连续调用 mapiternext 来从同一个 bmap 结构中获取两个键值对，然后在调用之间修改了 map 中的键对应的值，或是直接删除了某个键，那么很可能在第一次调用时这个 bmap 还是未迁移的状态，而第二次调用时却是已经迁移的状态了。要解决这个这个问题也很简单，因为一旦某个 bmap 被迁移，那么它的 tophash 会是 evacuatedX 或 evacuatedY，此时只需要在遍历到这种键值对时 [特殊处理](https://cs.opensource.google/go/go/+/refs/tags/go1.17.13:src/runtime/map.go;l=949-963) 即可。
