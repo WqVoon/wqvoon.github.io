@@ -66,4 +66,52 @@ RewriteFile 方法首先用当前解析的文件[初始化 Rewriter 结构中的
 
 # 故障注入实现
 
-TBD
+通常而言，failpoint 的使用者使用 Inject 函数的第一个参数，也就是 failpath 来标识一种故障，当然多个 Inject 的调用可以传递相同的 failpath，这时如果启用了这个 failpath，那么这些 Inject 都会被执行到。如前所述，Inject 函数在经历 AST 重写后会变成 Eval 函数，所以我们可以通过查看[这个函数的代码](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/failpoints.go#L268-L276)来了解故障注入是如何发生的。
+
+可以看到，Eval 的逻辑其实很简单，它直接调用了 [failpoints.Eval](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/failpoints.go#L200-L215) 方法，failpoint 是一个全局的 Failpoints 结构，所以对它内部字段的操作很可能会导致并发问题，因此 failpoints.Eval 首先做的事情就是加锁，然后到 failpoints.reg 中根据用户传入的 failpath（也就是传给 Inject 的第一个参数）来寻找一个 fp，然后调用这个 fp 的 Eval 方法。fp 是什么呢，根据Failpoints 结构的[定义](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/failpoints.go#L85-L89)，我们可以发现这是一个名为 Failpoint 结构（少了一个 `s`），它被定义在源码中的 [failpoint.go](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/failpoint.go#L39-L44) 文件中。继续深入到 [Failpoint.Eval](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/failpoint.go#L99-L112) 这个方法中，会发现这里也是先加了个锁，然后去调用了 fp.t.eval，具体来说，是一个名为 terms 的结构的 eval 方法，而这个 terms 则大有来头。
+
+通过梳理上面的这条链路我们就可以知道，当 Inject 被重写为 Eval 时，它最终会通过用户传递的 failpath 找到一个 terms，然后执行它的 eval 方法，这个方法会拿到一个 failpoint.Value 和一个 error，而这两个正是重写后的 AST 的 if 语句块接受的两个局部变量。不难想到，我们需要一种人为可控的方式，来把 failpath 和 terms 关联起来，从而灵活地返回不同的值来制造出不同的故障。failpoint 提供了两种，分别是环境变量和 http server。
+
+## 环境变量
+
+failpoint 的 README.md 中有提到，可以通过给 GO_FAILPOINTS 这个环境变量传递特定格式的值，来用不同的方式启动 failpath，格式的定义是这样的：
+
+```shell
+[<percent>%][<count>*]<type>[(args...)][-><more terms>]
+```
+
+这一坨正则表达式一样的东西看起来不怎么直观，下面来看一个具体的例子：
+
+```shell
+GO_FAILPOINTS='main/test=5*return("hahaha")->50%return("walalala")'
+```
+
+这个环境变量带来的效果是，`main/test` 这个 failpath 的前五次执行会通过 failpoint.Value 返回字符串形式的 “hahaha”，此后的执行则有 50% 的概率会返回字符串形式的 “walalala”，另 50% 则什么都不做。
+
+此外，如果想设置多个 failpath，则可以通过半角的分号来分割，比如：
+
+```shell
+GO_FAILPOINTS='main/test=5*return("hahaha")->50%return("walalala");main/test2=return(10086)'
+```
+
+这个例子设置了两个 failpath，`main/test` 和上面的逻辑是一样的，但与此同时也启用了 `main/test2` 这个 failpath，它固定通过 failpoint.Value 返回数值类型的 10086。
+
+所以，通过在运行程序前设置 GO_FAILPOINTS 这个环境变量，就可以把某个 failpath 和一种链式的逻辑绑定起来，这个链上通过 `->` 连接了一系列的具体逻辑，从前向后只要有一个能执行就会停止后面的逻辑。事实上，在代码层面这些一个个逻辑就对应一个 [term](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/terms.go#L56-L66)，而一批 term 就组成了 [terms](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/terms.go#L45-L54)，正如我们上面提到的，failpath 就是和一个 terms 结构对应起来的。
+
+在 failpoints.go 文件中，有一个 init 函数，这个函数在程序启动时会领先于 main 函数执行，它[读取了 GO_FAILPOINTS 这个环境变量](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/failpoints.go#L62-L76)，通过半角分号分割出不同的 failpath，然后执行 Enable 函数来完成 failpath 与 terms 的绑定。这个函数和上面提到的 Eval 相同，都是层层包装，最终调用的是 [Failpoint.Enable](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/failpoint.go#L52-L63) 这个函数，而这个 Failpoint 会被注册到全局 failpoints 的 reg 中，方便 Eval 在执行时通过 failpath 查找到。
+
+Failpoint.Enable 接受一个名为 inTerms 的参数，这个参数的值其实就是上面环境变量中等号后面那一坨，具体是指 `5*return("hahaha")->50%return("walalala")` 和 `return(10086)`，这个 inTerms 会被传递给 newTerms 函数，这个函数非常关键，它最终的效果是把这坨表达式转换成对应语义的代码，这是通过遍历 inTerms 并根据语法调用一系列的 parseXXX 来实现的。
+
+terms 结构中有一个 [term 数组](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/terms.go#L48-L49)，[terms.eval](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/terms.go#L111-L120) 方法在执行时会遍历这个数组，找到第一个 allow 方法返回 true 的 term，然后调用它的 do 方法并返回执行的结果。这里 allow 的判断就对应上面的 `5*` 和 `50%`，分别通过 [modCount](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/terms.go#L72-L80) 和 [modProb](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/terms.go#L82-L84) 来实现。而 do 方法则对应上面的 `return("hahaha")`，事实上，这个在语法中被称为 type 的部分取值有很多，被定义在 [actMap](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/terms.go#L301-L309) 中，每种取值对应一个函数。以 `return` 举例，它对应的函数 [actReturn](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/terms.go#L315) 的逻辑非常简单，就是直接将括号中的值解析并返回，解析是通过 [parseVal](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/terms.go#L263-L297) 函数来实现的，它能够解析字符串、数字以及布尔值。
+
+所以总结下来，用户可以通过 GO_FAILPOINTS 这个环境变量控制一个或多个 failpath 在什么情况下被触发，failpoint 在程序启动时会将这个环境变量的值解析成对应逻辑的代码，当用户程序执行到 Eval 时就会触发这部分逻辑，从而按用户的意愿来决定返回怎样的值。
+
+## HTTP Server
+
+环境变量的方式虽然很灵活，但它的缺点在于一旦程序启动后就不可变了，一些大型系统的启动时间可能会很长，同样一些程序的状态也可能很难构造，所以我们需要一种能够在程序执行期间动态修改 failpath 对应 terms 的能力。
+
+failpoint 通过在程序中嵌入一个 HttpServer 来实现这个功能，具体而言，用户在启动时可以通过 GO_FAILPOINTS_HTTP 传递一个 host，这个 host 在[程序启动时](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/failpoints.go#L77-L81)会被传递给 net.Listen 函数来获取一个 tcp 的 listener，并在这个 listener 上放置一个 HTTP 的[应用](https://github.com/pingcap/failpoint/blob/2eaa32854a6cece9be893bf4e3605c18586e9d6a/http.go#L51)。
+
+通过查看对应的代码，可以发现这个 HTTPServer 把请求中的 URL.Path 视为 failpath，并接受 PUT、GET 和 DELETE 三种 HTTP 方法，分别用于启用某个 failpath、查询某个或全部的 failpath 状态以及禁用某个 failpath。
+
+通过这种方式，就实现了程序运行期间动态注入故障的功能。
