@@ -4,8 +4,10 @@
   <meta charset="utf-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   
-  <title>一个关于 script 标签的 type 属性的另类用法 | Hygao Blog</title>
+  <title>bytedance/gopkg 中 gopool 的源码解读 | Hygao Blog</title>
   
+  
+  <meta name="description" content="趁热打铁，读完连接池读协程池">
   
 
   
@@ -296,8 +298,8 @@
         
   
     <h1 class="title">
-      <a href="/2020/09/25/ScriptType/">
-        一个关于 script 标签的 type 属性的另类用法
+      <a href="/2023/04/16/GoPool/">
+        bytedance/gopkg 中 gopool 的源码解读
       </a>
     </h1>
   
@@ -328,7 +330,7 @@
             <div class="new-meta-item date">
   <a class='notlink'>
     <i class="fas fa-calendar-alt" aria-hidden="true"></i>
-    <p>2020-09-25</p>
+    <p>2023-04-16</p>
   </a>
 </div>
 
@@ -336,14 +338,6 @@
         
           
             
-  
-  <div class='new-meta-item category'>
-    <a href='/categories/前端/' rel="nofollow">
-      <i class="fas fa-folder-open" aria-hidden="true"></i>
-      <p>前端</p>
-    </a>
-  </div>
-
 
           
         
@@ -380,18 +374,24 @@
 
     <section class="article typo">
       <div class="article-entry" itemprop="articleBody">
-        <h1 id="0x00-前言"><a href="#0x00-前言" class="headerlink" title="0x00 前言"></a>0x00 前言</h1><p>今天出于好奇跑去 React 官网转了一圈，看到里面提供了一个 <a href="https://raw.githubusercontent.com/reactjs/reactjs.org/master/static/html/single-file-example.html" target="_blank" rel="noopener">无需构建工具</a> 的体验例子，看到代码后感觉很神奇，因为它直接在 script 里的 render 函数中写入了 JSX ，并且成功渲染到了视图里，但是这种语法显然不是被允许的，红色的 <code>Uncaught SyntaxError: expected expression, got &#39;&lt;&#39;</code> 是应该出现在 console 中的。</p>
-<h1 id="0x01-原理及实现"><a href="#0x01-原理及实现" class="headerlink" title="0x01 原理及实现"></a>0x01 原理及实现</h1><p>思来想去，突然发现 script 中的 type 标签里并不是常规的 text/javascript ，而是非标准的 text/babel ，那么这个东西有什么影响呢？</p>
-<p>其实把这段代码复制到一个带语法高亮的编辑器中应该就能看到异样了，比如扔进我本地使用的 vscode 时就可以发现，script 标签中并没有提供语法高亮和代码补全功能。</p>
-<p>STFW 后得知，对于这种 type ，浏览器不会将其看作将被执行的 script ，而是当作普通的标签元素来看待，而既然这里的 type 是 babel，上面的 script:src 也引入了 babel ，那么想来编译并执行这段纯文本就是它的工作了。</p>
-<p>知道了这个原理后，就可以写出简单的渲染方法了，代码如下：</p>
-<figure class="highlight html"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">&lt;!-- HTML 文件 --&gt;</span></span><br><span class="line"><span class="meta">&lt;!DOCTYPE html&gt;</span></span><br><span class="line"><span class="tag">&lt;<span class="name">html</span> <span class="attr">lang</span>=<span class="string">"en"</span>&gt;</span></span><br><span class="line"><span class="tag">&lt;<span class="name">head</span>&gt;</span></span><br><span class="line">  <span class="tag">&lt;<span class="name">meta</span> <span class="attr">charset</span>=<span class="string">"UTF-8"</span>&gt;</span></span><br><span class="line">  <span class="tag">&lt;<span class="name">meta</span> <span class="attr">name</span>=<span class="string">"viewport"</span> <span class="attr">content</span>=<span class="string">"width=device-width, initial-scale=1.0"</span>&gt;</span></span><br><span class="line">  <span class="tag">&lt;<span class="name">title</span>&gt;</span>Render-Test<span class="tag">&lt;/<span class="name">title</span>&gt;</span></span><br><span class="line">  <span class="tag">&lt;<span class="name">script</span> <span class="attr">src</span>=<span class="string">"render.js"</span>&gt;</span><span class="tag">&lt;/<span class="name">script</span>&gt;</span></span><br><span class="line"><span class="tag">&lt;/<span class="name">head</span>&gt;</span></span><br><span class="line"><span class="tag">&lt;<span class="name">body</span>&gt;</span></span><br><span class="line">  <span class="tag">&lt;<span class="name">div</span> <span class="attr">id</span>=<span class="string">"app"</span>&gt;</span><span class="tag">&lt;/<span class="name">div</span>&gt;</span></span><br><span class="line">  </span><br><span class="line">  <span class="tag">&lt;<span class="name">script</span> <span class="attr">type</span>=<span class="string">"text/react"</span>&gt;</span></span><br><span class="line"><span class="javascript">    <span class="built_in">console</span>.log(<span class="string">"Output msg to console"</span>)</span></span><br><span class="line"></span><br><span class="line">    render(</span><br><span class="line"></span><br><span class="line"><span class="handlebars"><span class="xml">      <span class="tag">&lt;<span class="name">div</span>&gt;</span></span></span></span><br><span class="line"><span class="handlebars"><span class="xml">        <span class="tag">&lt;<span class="name">h1</span>&gt;</span>Hello, React!<span class="tag">&lt;/<span class="name">h1</span>&gt;</span></span></span></span><br><span class="line"><span class="handlebars"><span class="xml">        <span class="tag">&lt;<span class="name">spanInputBox</span>&lt;/<span class="attr">span</span>&gt;</span> <span class="tag">&lt;<span class="name">input</span> <span class="attr">type</span>=<span class="string">"text"</span>&gt;</span></span></span></span><br><span class="line"><span class="handlebars"><span class="xml">        <span class="tag">&lt;<span class="name">button</span> <span class="attr">onclick</span>=<span class="string">"alert('Hello!')"</span>&gt;</span>clickMe<span class="tag">&lt;/<span class="name">button</span>&gt;</span></span></span></span><br><span class="line"><span class="handlebars"><span class="xml">      <span class="tag">&lt;/<span class="name">div</span>&gt;</span>,</span></span></span><br><span class="line"></span><br><span class="line"><span class="javascript">      <span class="built_in">document</span>.getElementById(<span class="string">'app'</span>)</span></span><br><span class="line"></span><br><span class="line">    )</span><br><span class="line">  <span class="tag">&lt;/<span class="name">script</span>&gt;</span></span><br><span class="line"><span class="tag">&lt;/<span class="name">body</span>&gt;</span></span><br><span class="line"><span class="tag">&lt;/<span class="name">html</span>&gt;</span></span><br></pre></td></tr></table></figure>
+        <h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><p>前几天从连接池的角度阅读了标准库中 database/sql 的源码，并写了对应的<a href="/2023/04/12/SqlConnectionPool/">博客</a>做总结。最近逛 github 时看到字节开源的 gopkg 代码库中有一个叫 <a href="https://github.com/bytedance/gopkg/tree/develop/util/gopool" target="_blank" rel="noopener">gopool</a> 的协程池实现，代码只有 200 多行，感觉还蛮有意思的，于是就有了现在的这篇文章。</p>
+<h1 id="功能简述"><a href="#功能简述" class="headerlink" title="功能简述"></a>功能简述</h1><p>根据 readme 来看，gopool 的目标是作为 go 关键字的一个可选方案，具体来说，它对外暴露了 gopool.Go 这个函数，内部接收一个函数作为入参，这个函数不接受任何参数也不返回任何内容，但因为 golang 本身有闭包的特性，所以这并不影响使用。</p>
+<p>我个人非常喜欢 gopool 对外暴露的接口，因为它与 golang 本身的相似性使得使用起来时几乎没有什么心智负担。还是以 gopool.Go 函数为例，同 go 关键字相同，这个作为入参的函数是异步执行的，而且调用方也不会因为这个函数调用而阻塞。为了达成这个效果，gopool 不能真的起一个 goroutine，取而代之的，它用了类似 js 的任务队列的方式，因为它本身是做协程池的，如果每调一次 gopool.Go 就创建一个新协程，那这个函数就没意义了。</p>
+<p>最后，gopool 处理了协程内部的 panic。这点很重要，因为如果你使用了某个框架来开发应用，那么你的主流程的 panic 很可能可以被这个框架捕获并优雅处理，从而保证应用整体不会因为这个 panic 而崩溃，但如果你在主流程中启动了新的协程，这个协程的 panic 就需要由你自己来保证了，而这项工作通常是重复且枯燥的，gopool.Go 在这点上提供了一种侵入性很低的解决方案。</p>
+<h1 id="源码解读"><a href="#源码解读" class="headerlink" title="源码解读"></a>源码解读</h1><p>接下来把视角回到代码本身，上面介绍的 <a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/gopool.go#L36-L43" target="_blank" rel="noopener">gopool.Go</a> 函数其实是对全局 <a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/gopool.go#L23-L24" target="_blank" rel="noopener">defaultPool</a> 变量的 CtxGo 方法的调用（golang 标准库中有很多函数也是类似的实现方式，比如 net/http 的 client 和 handler），所以如果要了解原理，就需要看 defaultPool 本身是什么。</p>
+<p>从定义上看，defaultPool 是一个 <a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/pool.go#L23-L36" target="_blank" rel="noopener">Pool</a> 接口的实例，由 <a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/pool.go#L93-L101" target="_blank" rel="noopener">NewPool</a> 函数初始化，这个函数的功能很简单，它根据入参构造了一个 <a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/pool.go#L72-L91" target="_blank" rel="noopener">pool</a> 结构，然后将这个结构返回。pool 结构是 Pool 接口的一个实现，它的定义是下面这样的：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">type</span> pool <span class="keyword">struct</span> &#123;</span><br><span class="line">	<span class="comment">// 协程池的名字，有 Name 方法可以返回</span></span><br><span class="line">	name <span class="keyword">string</span></span><br><span class="line"></span><br><span class="line">	<span class="comment">// 这个协程池同时最多允许多少 worker 存在</span></span><br><span class="line">	<span class="built_in">cap</span> <span class="keyword">int32</span></span><br><span class="line">  </span><br><span class="line">	<span class="comment">// 配置信息，目前只有一个阈值的属性，具体见下文</span></span><br><span class="line">	config *Config</span><br><span class="line">  </span><br><span class="line">	<span class="comment">// task 队列的元信息，每一个 task 代表一个待执行的函数</span></span><br><span class="line">	taskHead  *task</span><br><span class="line">	taskTail  *task</span><br><span class="line">	taskLock  sync.Mutex</span><br><span class="line">	taskCount <span class="keyword">int32</span></span><br><span class="line"></span><br><span class="line">	<span class="comment">// 当前有多少个 worker 在运行中，每个 worker 代表一个 goroutine</span></span><br><span class="line">	workerCount <span class="keyword">int32</span></span><br><span class="line"></span><br><span class="line">	<span class="comment">// 由这个协程池中的协程引发的 panic 会由该函数处理</span></span><br><span class="line">	panicHandler <span class="function"><span class="keyword">func</span><span class="params">(context.Context, <span class="keyword">interface</span>&#123;&#125;)</span></span></span><br><span class="line"><span class="function">&#125;</span></span><br></pre></td></tr></table></figure>
 
-<p>render.js 文件内容如下：</p>
-<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">window</span>.onload = <span class="function"><span class="keyword">function</span> (<span class="params"></span>) </span>&#123;</span><br><span class="line">  <span class="keyword">const</span> pattern = <span class="regexp">/\s*render\s*\(\s*(&lt;.+&gt;)/g</span>s</span><br><span class="line"></span><br><span class="line">  <span class="keyword">const</span> scriptList = <span class="built_in">document</span>.querySelectorAll(<span class="string">'script[type="text/react"]'</span>)</span><br><span class="line"></span><br><span class="line">  globalThis.render = <span class="function"><span class="keyword">function</span> (<span class="params">template, node</span>) </span>&#123;</span><br><span class="line">    node.innerHTML = template</span><br><span class="line">  &#125;</span><br><span class="line"></span><br><span class="line">  <span class="keyword">for</span> (<span class="keyword">let</span> script <span class="keyword">of</span> scriptList) &#123;</span><br><span class="line">    <span class="built_in">eval</span>(script.textContent.replaceAll(</span><br><span class="line">      pattern,</span><br><span class="line">      (_, template) =&gt; <span class="string">`;render(\`<span class="subst">$&#123;template&#125;</span>\``</span>       </span><br><span class="line">    ))</span><br><span class="line">  &#125;</span><br><span class="line"></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>所以从这个定义我们能知道，如果把 pool 看作是一个可操作单元，那么它内部维护了一个 task 的队列（通过链表来实现），其中的每个 task 结构代表一个待执行的函数，除此之外，它还对应多个 worker，这些 worker 从 task 中获取函数并执行。总结来说，pool.CtxGo 方法是 task 的生产者，worker 则是 task 的消费者，两者的交互通过 task 链表来完成。</p>
+<p>下面我们直接来看 pool.CtxGo 这个方法，它也是协程池的核心方法，它的定义是这样的：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(p *pool)</span> <span class="title">CtxGo</span><span class="params">(ctx context.Context, f <span class="keyword">func</span>()</span>)</span> &#123;</span><br><span class="line">  <span class="comment">// 从 taskPool 中取一个 task 结构体，通过复用结构体来减少 gc 压力</span></span><br><span class="line">	t := taskPool.Get().(*task)</span><br><span class="line">  </span><br><span class="line">  <span class="comment">// 使用入参来初始化 task 结构</span></span><br><span class="line">	t.ctx = ctx</span><br><span class="line">	t.f = f</span><br><span class="line">  </span><br><span class="line">  <span class="comment">// 通过加锁将 task 并发安全地放在队列的尾部，并更新队列长度</span></span><br><span class="line">	p.taskLock.Lock()</span><br><span class="line">	<span class="keyword">if</span> p.taskHead == <span class="literal">nil</span> &#123;</span><br><span class="line">		p.taskHead = t</span><br><span class="line">		p.taskTail = t</span><br><span class="line">	&#125; <span class="keyword">else</span> &#123;</span><br><span class="line">		p.taskTail.next = t</span><br><span class="line">		p.taskTail = t</span><br><span class="line">	&#125;</span><br><span class="line">	p.taskLock.Unlock()</span><br><span class="line">	atomic.AddInt32(&amp;p.taskCount, <span class="number">1</span>)</span><br><span class="line">  </span><br><span class="line">	<span class="comment">// 满足条件时，从 workerPool 中取一个 worker 结构并在初始化后调用其 run 方法</span></span><br><span class="line">	<span class="keyword">if</span> (atomic.LoadInt32(&amp;p.taskCount) &gt;= p.config.ScaleThreshold &amp;&amp; p.WorkerCount() &lt; atomic.LoadInt32(&amp;p.<span class="built_in">cap</span>)) || p.WorkerCount() == <span class="number">0</span> &#123;</span><br><span class="line">		p.incWorkerCount()</span><br><span class="line">		w := workerPool.Get().(*worker)</span><br><span class="line">		w.pool = p</span><br><span class="line">		w.run()</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
-<p>大概思路就是找到所有 type 相符的 script 标签，给 jsx 的部分加上引号，然后把整坨内容扔进 eval 里跑一下，当然现实中肯定不会这么简单粗暴，这里只能说是一个 POC 吧。</p>
-<h1 id="0x02-总结"><a href="#0x02-总结" class="headerlink" title="0x02 总结"></a>0x02 总结</h1><p>没什么总结的，就是闲着没事水了一篇博客而已（</p>
+<p>在 gopool 中，task 和 worker 都通过 sync.Pool 来实现复用。当拿到一个可用的 task 结构后，pool.CtxGo 会将它放入 task 队列的尾部，然后判断一些条件，如果满足就获取一个可用的 worker 并调用其 run 方法，否则直接退出函数。所以整个过程中与入参的 f（也就是用户希望通过 goroutine 执行的函数）的关系其实只在于将它加入到链表中，f 在 pool.CtxGo 中并没有被执行到。</p>
+<p>worker 是真正干活的部分，它在 worker.pool 字段中保存了自己当前负责处理的 pool 结构，所以它也能间接访问到这个 pool 中的 task 链表。而它的核心方法是 <a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/worker.go#L40-L74" target="_blank" rel="noopener">worker.run</a>。可以发现，这个方法整体就是一个普通的 goroutine，内部有一个 for 循环，循环内首先尝试从 pool 的 task 链表中获取一个任务，如果拿到的是 nil，那么说明当前 pool 内没有要执行的 task，此时会做一些收尾工作并结束整个 goroutine 的运行。而如果获取到了 task，那么它会调用其内部的 f，这个 f 对应用户传入的某个待运行的函数。执行完毕后，这个 task 会被回收到 taskPool 中供未来复用。</p>
+<p>如果某个 task 执行时发生 panic，这个 panic 会被捕获，此时如果用户通过 <a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/pool.go#L141-L144" target="_blank" rel="noopener">pool.SetPanicHandler</a> 设置了 pool.panicHandler，那么 recover 返回的内容会被传递给这个函数，方便用户自己做一些自定义的操作。</p>
+<p>这里需要注意的是，为了实现 panic 的捕获，worker.run 在 for 循环内部起了一个<a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/worker.go#L58-L70" target="_blank" rel="noopener">立即执行表达式</a>，并在内部通过 defer 来做 panic 的 recover。这是必要的，因为只有这样它才能把 panic 的影响限制在单个 task 上。否则如果放在 worker.run 的一开始，那么当某个 task panic 时整个 worker.run 函数就会结束，其他的 task 就没办法被继续执行了；而如果放在内部的 goroutine 中，worker.run 就需要在 goroutine 异常退出时创建一个新的 goroutine，这就需要引入更多的 goroutine 来做监控，因为 worker.run 本身的执行是一定不能阻塞的，否则对外暴露的 gopool.Go 就会阻塞，这就与 go 关键字的行为不一致了。</p>
+<p>到此为止，我们就基本梳理完了协程池中 task 的创建与消费，但如果你回头看 pool 的定义，会发现它 cap 和 config 的字段没有提到，因为 pool.CtxGo 中 <a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/pool.go#L133" target="_blank" rel="noopener">if</a> 的条件我们也还没有分析。先说结论，一个 worker 就有能力消费掉 pool 中的所有 task，虽然这个消费的过程与主流程是异步的，但它自己内部其实是串行的，这意味着如果执行某个 task 需要花很长的时间，那么后面的 task 都要等这个 task 执行完才能继续被执行，所以为了解决这个问题，我们就需要有多个 worker 来一起并发消费 pool 中的 task。但通过前面的分析我们知道，一个 worker 对应一个 goroutine，而 gopool 是做协程池的，所以它必须要能够限制 goroutine 的数量。</p>
+<p>所以总结来说，我们既需要在 task 数量达到某个值时创建新的 worker 来避免所有的 task 串行执行，又需要限制 worker 的数量不能超过某个值。这个需求就是通过前面被我们跳过的 if 来实现的，具体来说，pool.config.ScaleThreshold 定义了一个下限，当 task 的数量大于等于这个值时，新的 worker 可能会被创建，而 pool.cap 定义了一个上限，它要求 worker 的总数不能超过这个值，这两个条件同时配合起来，就能够满足我们的要求了。</p>
 
       </div>
       
@@ -425,7 +425,7 @@
       
         <a class="-mob-share-qq" title="QQ好友" rel="external nofollow noopener noreferrer"
           
-          href="http://connect.qq.com/widget/shareqq/index.html?url=/2020/09/25/ScriptType/&title=一个关于 script 标签的 type 属性的另类用法 | Hygao Blog&summary="
+          href="http://connect.qq.com/widget/shareqq/index.html?url=/2023/04/16/GoPool/&title=bytedance/gopkg 中 gopool 的源码解读 | Hygao Blog&summary="
           
           >
           
@@ -437,7 +437,7 @@
       
         <a class="-mob-share-qzone" title="QQ空间" rel="external nofollow noopener noreferrer"
           
-          href="https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=/2020/09/25/ScriptType/&title=一个关于 script 标签的 type 属性的另类用法 | Hygao Blog&summary="
+          href="https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=/2023/04/16/GoPool/&title=bytedance/gopkg 中 gopool 的源码解读 | Hygao Blog&summary="
           
           >
           
@@ -449,7 +449,7 @@
       
         <a class="-mob-share-weibo" title="微博" rel="external nofollow noopener noreferrer"
           
-          href="http://service.weibo.com/share/share.php?url=/2020/09/25/ScriptType/&title=一个关于 script 标签的 type 属性的另类用法 | Hygao Blog&summary="
+          href="http://service.weibo.com/share/share.php?url=/2023/04/16/GoPool/&title=bytedance/gopkg 中 gopool 的源码解读 | Hygao Blog&summary="
           
           >
           
@@ -473,28 +473,14 @@
       
           <div class="prev-next">
               
-                  <section class="prev">
-                      <span class="art-item-left">
-                          <h6><i class="fas fa-chevron-left" aria-hidden="true"></i>&nbsp;上一页</h6>
-                          <h4>
-                              <a href="/2020/09/29/AsyncJavascript/" rel="prev" title="CallBack 与 Promise 与 Generator 与 async/await 的故事">
-                                
-                                    CallBack 与 Promise 与 Generator 与 async/await 的故事
-                                
-                              </a>
-                          </h4>
-                          
-                      </span>
-                  </section>
-              
               
                   <section class="next">
                       <span class="art-item-right" aria-hidden="true">
                           <h6>下一页&nbsp;<i class="fas fa-chevron-right" aria-hidden="true"></i></h6>
                           <h4>
-                              <a href="/2020/09/03/GitActionsTest/" rel="prev" title="测试 Github Actions">
+                              <a href="/2023/04/12/SqlConnectionPool/" rel="prev" title="从连接池的角度阅读 database/sql 包的源码">
                                   
-                                      测试 Github Actions
+                                      从连接池的角度阅读 database/sql 包的源码
                                   
                               </a>
                           </h4>
@@ -526,7 +512,7 @@
 
   <script>
     window.subData = {
-      title: '一个关于 script 标签的 type 属性的另类用法',
+      title: 'bytedance/gopkg 中 gopool 的源码解读',
       tools: true
     }
   </script>
