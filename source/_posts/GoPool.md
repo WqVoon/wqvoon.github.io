@@ -1,6 +1,7 @@
 ---
 title: bytedance/gopkg 中 gopool 的源码解读
 date: 2023-04-16 01:20:49
+categories:
  - [Golang]
 description: 趁热打铁，读完连接池读协程池
 ---
