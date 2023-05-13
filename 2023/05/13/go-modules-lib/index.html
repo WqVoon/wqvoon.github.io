@@ -428,15 +428,15 @@
 <figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">➜  testlib3 <span class="keyword">go</span> run .</span><br><span class="line">testlib2@v0<span class="number">.0</span><span class="number">.1</span> WrapperRegister</span><br><span class="line">testlib1@v0<span class="number">.0</span><span class="number">.1</span> Register</span><br><span class="line">testlib1@v0<span class="number">.0</span><span class="number">.1</span> GetAll</span><br><span class="line"><span class="keyword">map</span>[name:hygao]</span><br><span class="line">testlib1@v2<span class="number">.0</span><span class="number">.2</span> GetAll</span><br><span class="line"><span class="keyword">map</span>[]</span><br></pre></td></tr></table></figure>
 
 <p>从上面的输出中我们可以发现，此时整个项目中已经存在两个 testlib1 了，testlib2 使用 <strong>0.0.1</strong> 版本的 testlib1，testlib3 使用 <strong>2.0.2</strong> 版本的 testlib1，两者的全局 map 也不相同，所以 <code>go run</code> 输出了两个内容不同的 map。</p>
-<h2 id="一点小拓展"><a href="#一点小拓展" class="headerlink" title="一点小拓展"></a>一点小拓展</h2><p>上面的几组测试中，我们都保证了 testlib3 依赖的 testlib1 的版本大于 testlib2 依赖的 testlib1 版本。下面我们测试一下小于的情况，在 testlib2 中执行 <code>go get github.com/wqvoon/testlib1@v0.0.2</code> ，并将 prefix 修改为 “<a href="mailto:testlib2@v0.0.2" target="_blank" rel="noopener">testlib2@v0.0.2</a> “，commit 并打上对应的 tag 后发布到 github。</p>
-<p>此时回到 testlib3，执行 <code>go get github.com/wqvoon/testlib1@v0.0.1</code> 时会发现 golang 进行了如下的输出：</p>
+<h2 id="一点小拓展"><a href="#一点小拓展" class="headerlink" title="一点小拓展"></a>一点小拓展</h2><p>上面的几组测试中，我们都保证了 testlib3 依赖的 testlib1 的版本大于 testlib2 依赖的 testlib1 版本。下面我们测试一下小于的情况，回到 testlib3，执行 <code>go get github.com/wqvoon/testlib2@v0.0.2</code> 拉取 <strong>0.0.2</strong> 版本的 testlib2，根据我们前面的配置，这个版本的 testlib2 依赖 <strong>0.0.2</strong> 版本的 testlib1。</p>
+<p>更新了 testlib2 后，如果我们继续在 testlib3 中执行 <code>go get github.com/wqvoon/testlib1@v0.0.1</code> ，就会发现 golang 进行了如下的输出：</p>
 <figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">➜  testlib3 go get github.com/wqvoon/testlib1@v0.0.1</span><br><span class="line">go: downgraded github.com/wqvoon/testlib1 v0.0.2 =&gt; v0.0.1</span><br><span class="line">go: downgraded github.com/wqvoon/testlib2 v0.0.2 =&gt; v0.0.1</span><br></pre></td></tr></table></figure>
 
 <p>也就是说，golang 将 testlib2 也进行了降级，使整个项目能够满足用户对 testlib1 的版本要求。</p>
 <p>那么，是否有办法强制使用 <strong>0.0.2</strong> 版本的 testlib2，但却使用 <strong>0.0.1</strong> 版本的 testlib1 呢？答案是可以使用 replace，此时 testlib3 的 go.mod 文件如下：</p>
 <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">module github.com/wqvoon/testlib3</span><br><span class="line"></span><br><span class="line">go 1.18</span><br><span class="line"></span><br><span class="line">require (</span><br><span class="line">	github.com/wqvoon/testlib1 v0.0.2</span><br><span class="line">	github.com/wqvoon/testlib2 v0.0.2</span><br><span class="line">)</span><br><span class="line"></span><br><span class="line">replace github.com/wqvoon/testlib1 =&gt; github.com/wqvoon/testlib1 v0.0.1</span><br></pre></td></tr></table></figure>
 
-<p>此时执行 <code>go run</code> 就可以看到如下的输出了：</p>
+<p>然后执行 <code>go run</code> 就可以看到如下的输出了：</p>
 <figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">➜  testlib3 go run .</span><br><span class="line">testlib2@v0.0.2 WrapperRegister</span><br><span class="line">testlib1@v0.0.1 Register</span><br><span class="line">testlib1@v0.0.1 GetAll</span><br><span class="line">map[name:hygao]</span><br></pre></td></tr></table></figure>
 
 
@@ -450,7 +450,7 @@
     <div class='new-meta-box'>
       
         
-          <div class="new-meta-item date" itemprop="dateUpdated" datetime="2023-05-14T01:24:30+08:00">
+          <div class="new-meta-item date" itemprop="dateUpdated" datetime="2023-05-14T01:30:23+08:00">
   <a class='notlink'>
     <i class="fas fa-clock" aria-hidden="true"></i>
     <p>更新于 2023年5月14日</p>
