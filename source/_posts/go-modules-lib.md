@@ -58,6 +58,15 @@ func GetAll() {
 
 将这段代码进行 commit，并打上 **0.0.1** 的 tag。然后分别将 prefix 常量中的版本号改为 **0.0.2，0.2.1，2.0.1**，并创建对应的 commit 与 tag，做完这些操作，我们将拥有一个包含了 4 次 commit 的 testlib1。为了能够使用这个库，可以将它发布到 [github](https://github.com/WqVoon/testlib1) 上。
 
+此时 testlib1 的状态如下：
+
+```shell
+testlib1@v0.0.1 --依赖--> 无
+testlib1@v0.0.2 --依赖--> 无
+testlib1@v0.2.1 --依赖--> 无
+testlib1@v2.0.1 --依赖--> 无
+```
+
 ## 准备 testlib2（也就是前文的 b）
 
 在 testlib2 中，首先通过 `go get github.com/wqvoon/testlib1@v0.0.1` 拉取最低版本的 testlib1，然后在 testlib2 中写入如下的代码：
@@ -88,6 +97,13 @@ func WrapperGetAll() {
 在 testlib2 中，我们包装了 testlib1 的 Register 和 GetAll，在原本的逻辑之外输出了 testlib2 自身的版本信息。
 
 同样，我们对这段代码进行 commit，并打上 **0.0.1** 的 tag。然后，我们用 `go get github.com/wqvoon/testlib1@v0.0.2` 拉取 **0.0.2** 版本的 testlib1，修改 prefix 为 "testlib2@v0.0.2 "，然后进行 commit，并打上 **0.0.2** 的 tag。做完这些操作，我们将拥有一个包含 2 次 commit 的 testlib2，为了能够使用这个库，可以将它发布到 [github](https://github.com/WqVoon/testlib2) 上。
+
+此时 testlib2 的状态如下：
+
+```shell
+testlib2@v0.0.1 --依赖--> testlib1@v0.0.1
+testlib2@v0.0.2 --依赖--> testlib1@v0.0.2
+```
 
 ## 准备 testlib3（也就是前文的 a）
 
