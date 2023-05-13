@@ -202,9 +202,9 @@ map[]
 
 ## 一点小拓展
 
-上面的几组测试中，我们都保证了 testlib3 依赖的 testlib1 的版本大于 testlib2 依赖的 testlib1 版本。下面我们测试一下小于的情况，在 testlib2 中执行 `go get github.com/wqvoon/testlib1@v0.0.2` ，并将 prefix 修改为 "testlib2@v0.0.2 "，commit 并打上对应的 tag 后发布到 github。
+上面的几组测试中，我们都保证了 testlib3 依赖的 testlib1 的版本大于 testlib2 依赖的 testlib1 版本。下面我们测试一下小于的情况，回到 testlib3，执行 `go get github.com/wqvoon/testlib2@v0.0.2` 拉取 **0.0.2** 版本的 testlib2，根据我们前面的配置，这个版本的 testlib2 依赖 **0.0.2** 版本的 testlib1。
 
-此时回到 testlib3，执行 `go get github.com/wqvoon/testlib1@v0.0.1` 时会发现 golang 进行了如下的输出：
+更新了 testlib2 后，如果我们继续在 testlib3 中执行 `go get github.com/wqvoon/testlib1@v0.0.1` ，就会发现 golang 进行了如下的输出：
 
 ```shell
 ➜  testlib3 go get github.com/wqvoon/testlib1@v0.0.1
@@ -230,7 +230,7 @@ replace github.com/wqvoon/testlib1 => github.com/wqvoon/testlib1 v0.0.1
 
 ```
 
-此时执行 `go run` 就可以看到如下的输出了：
+然后执行 `go run` 就可以看到如下的输出了：
 
 ```shell
 ➜  testlib3 go run .
