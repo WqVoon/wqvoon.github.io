@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html>
+<head><meta name="generator" content="Hexo 3.9.0">
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  
+  <title>sync 标准库部分内容源码解读 | Hygao Blog</title>
+  
+  
+  <meta name="description" content="包括 Mutex、RWMutex、WaitGroup">
+  
+
+  
+
+  <meta name="HandheldFriendly" content="True">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <!-- meta -->
+  
+
+  <!-- link -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/fancyapps/fancybox@3.5.7/dist/jquery.fancybox.min.css">
+  
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/node-waves@0.7.6/dist/waves.min.css">
+  
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.10.1/css/all.min.css">
+  
+
+  
+
+  
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/xaoxuu/cdn-material-x@19.9.9/css/style.css">
+  
+
+  <script>
+    function setLoadingBarProgress(num) {
+      document.getElementById('loading-bar').style.width=num+"%";
+    }
+  </script>
+
+  <script type="text/javascript" src="/js/FunnyTitle.js"></script>
+
+  
+  
+</head>
+
+<body>
+  
+  
+  <div class="cover-wrapper">
+    <cover class='cover post half'>
+      
+        
+  <h1 class='title'>Hygao's Blog</h1>
+
+
+  <div class="m_search">
+    <form name="searchform" class="form u-search-form">
+      <input type="text" class="input u-search-input" placeholder="世界那么大，我想搜搜看" />
+      <i class="icon fas fa-search fa-fw"></i>
+    </form>
+  </div>
+
+<div class='menu navgation'>
+  <ul class='h-list'>
+    
+      
+        <li>
+          <a class="nav home" href="/"
+            
+            
+            id="home">
+            <i class='fas fa-rss fa-fw'></i>&nbsp;博文
+          </a>
+        </li>
+      
+        <li>
+          <a class="nav home" href="/tools/"
+            
+            
+            id="tools">
+            <i class='fas fa-bars fa-fw'></i>&nbsp;杂项
+          </a>
+        </li>
+      
+        <li>
+          <a class="nav home" href="/categories/"
+            
+            
+            id="categories">
+            <i class='fas fa-folder-open fa-fw'></i>&nbsp;分类
+          </a>
+        </li>
+      
+        <li>
+          <a class="nav home" href="/friends/"
+            
+              rel="nofollow"
+            
+            
+            id="friends">
+            <i class='fas fa-link fa-fw'></i>&nbsp;友链
+          </a>
+        </li>
+      
+        <li>
+          <a class="nav home" href="/about/"
+            
+              rel="nofollow"
+            
+            
+            id="about">
+            <i class='fas fa-info-circle fa-fw'></i>&nbsp;关于
+          </a>
+        </li>
+      
+    
+  </ul>
+</div>
+
+      
+    </cover>
+    <header class="l_header pure">
+  <div id="loading-bar-wrapper">
+    <div id="loading-bar" class="pure"></div>
+  </div>
+
+	<div class='wrapper'>
+		<div class="nav-main container container--flex">
+      <a class="logo flat-box" href='/' >
+        
+          Hygao Blog
+        
+      </a>
+			<div class='menu navgation'>
+				<ul class='h-list'>
+          
+  					
+  						<li>
+								<a class="nav flat-box" href="/"
+                  
+                  
+                  id="home">
+									<i class='fas fa-rss fa-fw'></i>&nbsp;博文
+								</a>
+							</li>
+      			
+  						<li>
+								<a class="nav flat-box" href="/tools/"
+                  
+                  
+                  id="tools">
+									<i class='fas fa-bars fa-fw'></i>&nbsp;杂项
+								</a>
+							</li>
+      			
+  						<li>
+								<a class="nav flat-box" href="/categories/"
+                  
+                  
+                  id="categories">
+									<i class='fas fa-folder-open fa-fw'></i>&nbsp;分类
+								</a>
+							</li>
+      			
+  						<li>
+								<a class="nav flat-box" href="/friends/"
+                  
+                    rel="nofollow"
+                  
+                  
+                  id="friends">
+									<i class='fas fa-link fa-fw'></i>&nbsp;友链
+								</a>
+							</li>
+      			
+  						<li>
+								<a class="nav flat-box" href="/about/"
+                  
+                    rel="nofollow"
+                  
+                  
+                  id="about">
+									<i class='fas fa-info-circle fa-fw'></i>&nbsp;关于
+								</a>
+							</li>
+      			
+      		
+				</ul>
+			</div>
+
+			
+				<div class="m_search">
+					<form name="searchform" class="form u-search-form">
+						<input type="text" class="input u-search-input" placeholder="搜索" />
+						<i class="icon fas fa-search fa-fw"></i>
+					</form>
+				</div>
+			
+			<ul class='switcher h-list'>
+				
+					<li class='s-search'><a class="fas fa-search fa-fw" href='javascript:void(0)'></a></li>
+				
+				<li class='s-menu'><a class="fas fa-bars fa-fw" href='javascript:void(0)'></a></li>
+			</ul>
+		</div>
+
+		<div class='nav-sub container container--flex'>
+			<a class="logo flat-box"></a>
+			<ul class='switcher h-list'>
+				<li class='s-comment'><a class="flat-btn fas fa-comments fa-fw" href='javascript:void(0)'></a></li>
+        
+          <li class='s-toc'><a class="flat-btn fas fa-list fa-fw" href='javascript:void(0)'></a></li>
+        
+			</ul>
+		</div>
+	</div>
+</header>
+	<aside class="menu-phone">
+    <header>
+		<nav class="menu navgation">
+      <ul>
+        
+          
+            <li>
+							<a class="nav flat-box" href="/"
+                
+                
+                id="home">
+								<i class='fas fa-rss fa-fw'></i>&nbsp;博文
+							</a>
+            </li>
+          
+            <li>
+							<a class="nav flat-box" href="/tools/"
+                
+                
+                id="tools">
+								<i class='fas fa-bars fa-fw'></i>&nbsp;杂项
+							</a>
+            </li>
+          
+            <li>
+							<a class="nav flat-box" href="/categories/"
+                
+                
+                id="categories">
+								<i class='fas fa-folder-open fa-fw'></i>&nbsp;分类
+							</a>
+            </li>
+          
+            <li>
+							<a class="nav flat-box" href="/friends/"
+                
+                  rel="nofollow"
+                
+                
+                id="friends">
+								<i class='fas fa-link fa-fw'></i>&nbsp;友链
+							</a>
+            </li>
+          
+            <li>
+							<a class="nav flat-box" href="/about/"
+                
+                  rel="nofollow"
+                
+                
+                id="about">
+								<i class='fas fa-info-circle fa-fw'></i>&nbsp;关于
+							</a>
+            </li>
+          
+       
+      </ul>
+		</nav>
+    </header>
+	</aside>
+<script>setLoadingBarProgress(40);</script>
+
+  </div>
+
+
+  <div class="l_body">
+    <div class='body-wrapper'>
+      <div class='l_main'>
+  
+
+  <article id="post" class="post white-box article-type-post" itemscope itemprop="blogPost">
+    
+
+
+  <section class='meta'>
+    
+    
+    <div class="meta" id="header-meta">
+      
+        
+  
+    <h1 class="title">
+      <a href="/2023/07/01/golang-sync-package-v2/">
+        sync 标准库部分内容源码解读
+      </a>
+    </h1>
+  
+
+
+      
+      <div class='new-meta-box'>
+        
+          
+        
+          
+            
+  <div class='new-meta-item author'>
+    
+      <a href="/" rel="nofollow">
+        
+          <i class="fas fa-user" aria-hidden="true"></i>
+        
+        <p>Hygao</p>
+      </a>
+    
+  </div>
+
+
+          
+        
+          
+            <div class="new-meta-item date">
+  <a class='notlink'>
+    <i class="fas fa-calendar-alt" aria-hidden="true"></i>
+    <p>2023-07-01</p>
+  </a>
+</div>
+
+          
+        
+          
+            
+  
+  <div class='new-meta-item category'>
+    <a href='/categories/Golang/' rel="nofollow">
+      <i class="fas fa-folder-open" aria-hidden="true"></i>
+      <p>Golang</p>
+    </a>
+  </div>
+
+
+          
+        
+          
+            
+  
+    <div class="new-meta-item browse busuanzi">
+      <a class='notlink'>
+        <i class="fas fa-eye" aria-hidden="true"></i>
+        <p>
+          <span id="busuanzi_value_page_pv">
+            <i class="fas fa-spinner fa-spin fa-fw" aria-hidden="true"></i>
+          </span>
+        </p>
+      </a>
+    </div>
+  
+
+
+          
+        
+          
+            
+
+          
+        
+      </div>
+      
+        <hr>
+      
+    </div>
+  </section>
+
+
+    <section class="article typo">
+      <div class="article-entry" itemprop="articleBody">
+        <h1 id="1-前言"><a href="#1-前言" class="headerlink" title="1. 前言"></a>1. 前言</h1><p>之前曾经阅读过 x/sync 包的代码，这些工具在 sync 标准库的基础上封装出更贴合业务的抽象。相对比之下，sync 中提供的内容就更底层一些。最近心血来潮想继续研究下 sync 本身的一些内容，于是就有了这篇博客。本篇博客尝试从源码的角度来讨论其中的三个常用工具，并假设读者有过它们的使用经验，所以不会在使用方式上做过多说明。此外为了更加关注核心逻辑，我们下文贴出的代码会删减掉 race 相关的内容。</p>
+<p>在介绍具体的工具前，我们需要先意识到一个问题，就是 golang 通过提供协程来向使用者屏蔽了操作系统层面的进程和线程，所以标准库中提供的各种工具也是用于做协程间同步的，这也就少不了与运行时的相互配合，这里具体来说就是信号量，事实上这篇文章所介绍的三个工具中都用到了信号量来做协程的阻塞与唤醒。我们这里不对信号量的原理做解释，只需要了解在 golang 中它能够提供的功能即可。</p>
+<h1 id="2-Mutex"><a href="#2-Mutex" class="headerlink" title="2. Mutex"></a>2. Mutex</h1><h2 id="2-1-基本原理"><a href="#2-1-基本原理" class="headerlink" title="2.1. 基本原理"></a>2.1. 基本原理</h2><p>Mutex 对外仅提供 Lock 和 Unlock 两个方法，并保证同一时间仅能有一个协程从 Lock 方法返回，其他与之竞争的协程在 Unlock 方法被调用前会阻塞在 Lock 方法中。但 golang 并没有限制调用 Unlock 方法的协程一定是成功从 Lock 方法返回的协程，也就是说幸运的协程 a 通过 Lock 获取到锁后，另一个协程 b 也可以调用 Unlock 来解除 a 对锁的占用。</p>
+<p>Mutex 核心依赖 atomic 提供的原子操作以及前文提到的 runtime 提供的信号量，通过这两个工具的相互配合来对外提供便捷的方法调用。在加锁时，未能成功获取到锁的协程可能会尝试进行自旋，自旋会为它提供更多的机会来成功获取这个锁。当自旋失败时，协程就会通过信号量阻塞起来，直到锁被释放时才有机会被唤醒继续尝试加锁。由于同一时间只有一个协程能获取到锁，所以阻塞的协程会相对更多。为了避免阻塞的协程长时间获取不到锁导致的饥饿现象，golang 为 Mutex 加入了“饥饿模式”，在饥饿模式下已经阻塞过的协程会优先于新来的协程获取锁。</p>
+<h2 id="2-2-核心数据结构"><a href="#2-2-核心数据结构" class="headerlink" title="2.2. 核心数据结构"></a>2.2. 核心数据结构</h2><p>Mutex 的核心结构自然就是 Mutex 结构体，这个结构体的构成非常简单，具体如下：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">type</span> Mutex <span class="keyword">struct</span> &#123;</span><br><span class="line">	state <span class="keyword">int32</span></span><br><span class="line">	sema  <span class="keyword">uint32</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>其中 sema 非常简单，仅仅用于作为信号量来实现协程的阻塞与唤醒；而 state 用于记录 Mutex 当前的状态，右边第一位代表当前 Mutex 是否已上锁，第二位代表当前是否有协程被唤醒，第三位代表当前 Mutex 是否处于“饥饿模式”，从第四位开始到最左边共计 29 位用于记录当前有多少个协程被阻塞。为了方便操作，标准库提供了一些常量来记录这些信息，具体如下：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">const</span> (</span><br><span class="line">	mutexLocked = <span class="number">1</span> &lt;&lt; <span class="literal">iota</span> <span class="comment">// 取值为 1，通过“与操作”来判断是否加锁</span></span><br><span class="line">	mutexWoken <span class="comment">// 取值为 2，通过“与操作”来判断是否有协程被唤醒</span></span><br><span class="line">	mutexStarving <span class="comment">// 取值为 4，通过“与操作”来判断是否处于饥饿模式</span></span><br><span class="line">	mutexWaiterShift = <span class="literal">iota</span> <span class="comment">// 取值为 3，通过“左移右移”来从 state 中获取阻塞的协程数量</span></span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+
+<p>通过上面的这段描述我们就可以发现，一个零值的 Mutex 就是一个有效的初态的锁，所以我们可以简单通过 <code>Mutex{}</code> 或 <code>&amp;Mutex{}</code> 来初始化一个锁，标准库也就没有对外提供类似 NewMutex 这样的函数。</p>
+<h2 id="2-3-加锁过程"><a href="#2-3-加锁过程" class="headerlink" title="2.3. 加锁过程"></a>2.3. 加锁过程</h2><p>Mutex 的加锁被分成了两个函数：作为主体对外暴露的 Lock 方法和 Lock 内部可能调用的 lockSlow 方法。其中，Lock 方法的定义非常简单，具体如下：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(m *Mutex)</span> <span class="title">Lock</span><span class="params">()</span></span> &#123;</span><br><span class="line">	<span class="comment">// Fast path: grab unlocked mutex.</span></span><br><span class="line">	<span class="keyword">if</span> atomic.CompareAndSwapInt32(&amp;m.state, <span class="number">0</span>, mutexLocked) &#123;</span><br><span class="line">		<span class="keyword">return</span></span><br><span class="line">	&#125;</span><br><span class="line">	<span class="comment">// Slow path (outlined so that the fast path can be inlined)</span></span><br><span class="line">	m.lockSlow()</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>可以看到 Lock 方法仅仅就是通过 CAS 来尝试将 state 的最低位置一，对于一个初态的锁而言这一个简单的操作就足够了，所以这被称为 fast-path。但事实上锁竞争是不可避免的，否则就不需要使用 Mutex 了，对于这类情况，流程会进入到 lockSlow 方法中。</p>
+<p>其实这种 fast-path + slow-path 的编码方式在 golang 标准库的好多地方都可以看到，我个人理解这样的一个好处在于外层的 Lock 方法足够简单以至于可以被内联到调用处，而一旦形成内联，那么 fast-path 就真的非常快了。</p>
+<p>回到 lockSlow，这个函数应该说是 Mutex 的核心所在了。我们直接给出这个函数的流程注释：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br><span class="line">85</span><br><span class="line">86</span><br><span class="line">87</span><br><span class="line">88</span><br><span class="line">89</span><br><span class="line">90</span><br><span class="line">91</span><br><span class="line">92</span><br><span class="line">93</span><br><span class="line">94</span><br><span class="line">95</span><br><span class="line">96</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(m *Mutex)</span> <span class="title">lockSlow</span><span class="params">()</span></span> &#123;</span><br><span class="line">	<span class="keyword">var</span> waitStartTime <span class="keyword">int64</span> <span class="comment">// 如果协程陷入阻塞，记录开始阻塞的时间</span></span><br><span class="line">	starving := <span class="literal">false</span> <span class="comment">// 如果为 true，那么当前协程应该将 Mutex 设置为饥饿模式</span></span><br><span class="line">	awoke := <span class="literal">false</span> <span class="comment">// 和 mutexWoken 配合用于保证同一时间仅有一个协程被唤醒</span></span><br><span class="line">	iter := <span class="number">0</span> <span class="comment">// 当前协程已经自旋的次数，在下次被唤醒时会重置</span></span><br><span class="line">	old := m.state <span class="comment">// 刚调用 lockSlow 时，state 的取值</span></span><br><span class="line">	<span class="keyword">for</span> &#123;</span><br><span class="line">		<span class="comment">// 如果当前 Mutex 已加锁且不处于饥饿模式，并且 runtime_canSpin 返回 true，</span></span><br><span class="line">    <span class="comment">// 那么虽然当前协程没有获取到锁，但它被允许通过自旋来避免立即陷入阻塞</span></span><br><span class="line">		<span class="keyword">if</span> old&amp;(mutexLocked|mutexStarving) == mutexLocked &amp;&amp; runtime_canSpin(iter) &#123;</span><br><span class="line">			<span class="comment">// 如果当前协程是新来的协程，且虽然当前有因获取不到锁而阻塞的协程，但 Mutex 还没有唤醒它们，</span></span><br><span class="line">      <span class="comment">// 那么尝试设置 mutexWoken，因为既然新来的协程在自旋，那么就说明已经有锁竞争，</span></span><br><span class="line">      <span class="comment">// 此时 Mutex 继续唤醒协程会进一步加剧锁竞争的剧烈程度</span></span><br><span class="line">			<span class="keyword">if</span> !awoke &amp;&amp; old&amp;mutexWoken == <span class="number">0</span> &amp;&amp; old&gt;&gt;mutexWaiterShift != <span class="number">0</span> &amp;&amp;</span><br><span class="line">				atomic.CompareAndSwapInt32(&amp;m.state, old, old|mutexWoken) &#123;</span><br><span class="line">				awoke = <span class="literal">true</span></span><br><span class="line">			&#125;</span><br><span class="line">      <span class="comment">// 自旋，实际上是调用了 pause 指令</span></span><br><span class="line">			runtime_doSpin()</span><br><span class="line">			iter++</span><br><span class="line">      <span class="comment">// 获取新的 state，因为自旋的过程中 state 的取值可能会发生变化</span></span><br><span class="line">			old = m.state</span><br><span class="line">			<span class="keyword">continue</span></span><br><span class="line">		&#125;</span><br><span class="line">    <span class="comment">// 以旧的 state 取值为基础，后面的流程在更新这个 new 变量，最后再通过 CAS 操作尝试更新 old</span></span><br><span class="line">		<span class="built_in">new</span> := old</span><br><span class="line">		<span class="comment">// 仅在非饥饿模式下，新来的协程才被允许加锁，因为饥饿模式下锁会被交给被唤醒的协程</span></span><br><span class="line">		<span class="keyword">if</span> old&amp;mutexStarving == <span class="number">0</span> &#123;</span><br><span class="line">			<span class="built_in">new</span> |= mutexLocked</span><br><span class="line">		&#125;</span><br><span class="line">    <span class="comment">// 如果 Mutex 已经加锁或已经处于饥饿模式，那么当前协程只能乖乖陷入阻塞，</span></span><br><span class="line">    <span class="comment">// 但在那之前需要增加 waiter 的数量，这样 Unlock 才知道该唤醒多少个协程</span></span><br><span class="line">		<span class="keyword">if</span> old&amp;(mutexLocked|mutexStarving) != <span class="number">0</span> &#123;</span><br><span class="line">			<span class="built_in">new</span> += <span class="number">1</span> &lt;&lt; mutexWaiterShift</span><br><span class="line">		&#125;</span><br><span class="line">		<span class="comment">// starving 是在当前协程被唤醒时才有可能更新的，而一旦它为 true，就代表 Mutex 需要进入饥饿模式</span></span><br><span class="line">		<span class="keyword">if</span> starving &amp;&amp; old&amp;mutexLocked != <span class="number">0</span> &#123;</span><br><span class="line">			<span class="built_in">new</span> |= mutexStarving</span><br><span class="line">		&#125;</span><br><span class="line">    <span class="comment">// 如果当前协程设置过 mutexWoken 或当前协程是被 Unlock 唤醒的，那么 awoke 取值为 true，</span></span><br><span class="line">    <span class="comment">// 此时这个协程需要取消设置 mutexWoken，否则就不会有协程被 Unlock 唤醒了</span></span><br><span class="line">		<span class="keyword">if</span> awoke &#123;</span><br><span class="line">			<span class="keyword">if</span> <span class="built_in">new</span>&amp;mutexWoken == <span class="number">0</span> &#123;</span><br><span class="line">				throw(<span class="string">"sync: inconsistent mutex state"</span>)</span><br><span class="line">			&#125;</span><br><span class="line">			<span class="built_in">new</span> &amp;^= mutexWoken</span><br><span class="line">		&#125;</span><br><span class="line">    <span class="comment">// 尝试用 CAS 更新 state</span></span><br><span class="line">		<span class="keyword">if</span> atomic.CompareAndSwapInt32(&amp;m.state, old, <span class="built_in">new</span>) &#123;</span><br><span class="line">      <span class="comment">// 如果 old 既不是饥饿模式也没有上锁，那么 new 一定是设置了 mutexLocked 的，</span></span><br><span class="line">      <span class="comment">// 而能够执行到这里就说明 CAS 成功了，也就是说当前协程获取到了锁，直接返回即可</span></span><br><span class="line">			<span class="keyword">if</span> old&amp;(mutexLocked|mutexStarving) == <span class="number">0</span> &#123;</span><br><span class="line">				<span class="keyword">break</span></span><br><span class="line">			&#125;</span><br><span class="line">			<span class="comment">// 如果 waitStartTime 不为 0，那么说明当前协程此前阻塞过，此时要将当前协程放在阻塞队列的队首，</span></span><br><span class="line">      <span class="comment">// 这样下次会优先唤醒当前协程，避免饥饿现象</span></span><br><span class="line">			queueLifo := waitStartTime != <span class="number">0</span></span><br><span class="line">      <span class="comment">// 如果 waitStartTime 为 0，说明当前协程还未阻塞过，</span></span><br><span class="line">      <span class="comment">// 此时向该变量写入当前时间用于区分那些未阻塞过的协程</span></span><br><span class="line">			<span class="keyword">if</span> waitStartTime == <span class="number">0</span> &#123;</span><br><span class="line">				waitStartTime = runtime_nanotime()</span><br><span class="line">			&#125;</span><br><span class="line">      <span class="comment">// 通过信号量将当前协程阻塞</span></span><br><span class="line">			runtime_SemacquireMutex(&amp;m.sema, queueLifo, <span class="number">1</span>)</span><br><span class="line">      </span><br><span class="line">      <span class="comment">// 能执行到这里，说明当前协程被唤醒了，此时判断当前协程的阻塞时间是否已经大于 starvationThresholdNs，</span></span><br><span class="line">      <span class="comment">// 如果为 true，那么将 starving 置为 true，此后这个协程会将 Mutex 切换为饥饿模式</span></span><br><span class="line">			starving = starving || runtime_nanotime()-waitStartTime &gt; starvationThresholdNs</span><br><span class="line">			old = m.state</span><br><span class="line">      <span class="comment">// 如果当前 Mutex 已经是饥饿模式了，那么其他协程不会尝试获取锁，当前协程的优先级更高</span></span><br><span class="line">			<span class="keyword">if</span> old&amp;mutexStarving != <span class="number">0</span> &#123;</span><br><span class="line">				<span class="keyword">if</span> old&amp;(mutexLocked|mutexWoken) != <span class="number">0</span> || old&gt;&gt;mutexWaiterShift == <span class="number">0</span> &#123;</span><br><span class="line">					throw(<span class="string">"sync: inconsistent mutex state"</span>)</span><br><span class="line">				&#125;</span><br><span class="line">        <span class="comment">// 从后面的 unlockSlow 可以看到，饥饿模式下唤醒协程后不会减少 waiter 的数量，</span></span><br><span class="line">        <span class="comment">// 所以当前协程需要自己来设置这个新的值</span></span><br><span class="line">				delta := <span class="keyword">int32</span>(mutexLocked - <span class="number">1</span>&lt;&lt;mutexWaiterShift)</span><br><span class="line">        <span class="comment">// 如果当前协程的阻塞时长还没达到 starvationThresholdNs，或当前协程是最后一个 waiter，</span></span><br><span class="line">        <span class="comment">// 那么取消 Mutex 的饥饿模式，因为饥饿模式太低效了，新的协程根本没有机会获得锁</span></span><br><span class="line">				<span class="keyword">if</span> !starving || old&gt;&gt;mutexWaiterShift == <span class="number">1</span> &#123;</span><br><span class="line">					delta -= mutexStarving</span><br><span class="line">				&#125;</span><br><span class="line">        <span class="comment">// 一旦进入饥饿模式，新的协程都只会增加 waiter，而不会操作 delta 中依赖的部分，</span></span><br><span class="line">        <span class="comment">// 所以这里可以放心地用 AddInt32 而不需要用 CAS</span></span><br><span class="line">				atomic.AddInt32(&amp;m.state, delta)</span><br><span class="line">				<span class="keyword">break</span></span><br><span class="line">			&#125;</span><br><span class="line">			awoke = <span class="literal">true</span></span><br><span class="line">			iter = <span class="number">0</span></span><br><span class="line">		&#125; <span class="keyword">else</span> &#123;</span><br><span class="line">      <span class="comment">// 如果失败，取 state 的最新值，重新执行 for 循环，</span></span><br><span class="line">      <span class="comment">// 因为没有重置 iter，所以当前协程不会再进行自旋</span></span><br><span class="line">			old = m.state</span><br><span class="line">		&#125;</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h2 id="2-4-解锁过程"><a href="#2-4-解锁过程" class="headerlink" title="2.4. 解锁过程"></a>2.4. 解锁过程</h2><p>解锁过程同加锁过程一样，也是由 Unlock 和 unlockSlow 来配合实现的，但解锁相较于加锁要简单很多：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(m *Mutex)</span> <span class="title">Unlock</span><span class="params">()</span></span> &#123;</span><br><span class="line">	<span class="comment">// 对一个未加锁的 Mutex 调用 Unlock 属于运行时错误，unlockSlow 会直接 panic，</span></span><br><span class="line">  <span class="comment">// 所以这里就先放心地通过 AddInt32 去掉 mutexLocked</span></span><br><span class="line">	<span class="built_in">new</span> := atomic.AddInt32(&amp;m.state, -mutexLocked)</span><br><span class="line">  <span class="comment">// 如果不为 0，那么说明当前 Mutex 有 waiter，此时需要进入 unlockSlow，</span></span><br><span class="line">  <span class="comment">// 否则 Unlock 就算结束了，Mutex 经过这个操作后会回归初态</span></span><br><span class="line">	<span class="keyword">if</span> <span class="built_in">new</span> != <span class="number">0</span> &#123;</span><br><span class="line">		m.unlockSlow(<span class="built_in">new</span>)</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(m *Mutex)</span> <span class="title">unlockSlow</span><span class="params">(<span class="built_in">new</span> <span class="keyword">int32</span>)</span></span> &#123;</span><br><span class="line">  <span class="comment">// 如上所述，如果这个条件成立，那么说明使用者对一个未加锁的 Mutex 调用了 Unlock，</span></span><br><span class="line">  <span class="comment">// 这是不被允许的，所以会直接 panic</span></span><br><span class="line">	<span class="keyword">if</span> (<span class="built_in">new</span>+mutexLocked)&amp;mutexLocked == <span class="number">0</span> &#123;</span><br><span class="line">		throw(<span class="string">"sync: unlock of unlocked mutex"</span>)</span><br><span class="line">	&#125;</span><br><span class="line">  <span class="comment">// 如果当前未处于饥饿模式</span></span><br><span class="line">	<span class="keyword">if</span> <span class="built_in">new</span>&amp;mutexStarving == <span class="number">0</span> &#123;</span><br><span class="line">		old := <span class="built_in">new</span></span><br><span class="line">		<span class="keyword">for</span> &#123;</span><br><span class="line">      <span class="comment">// 如果当前已经没有 waiter，或者 Mutex 又被上了锁，</span></span><br><span class="line">      <span class="comment">// 或者新来的协程设置了 mutexWoken 标记，</span></span><br><span class="line">      <span class="comment">// 或者其他协程将当前 Mutex 设置为饥饿模式，</span></span><br><span class="line">      <span class="comment">// Unlock 都不该唤醒新的协程，此时直接返回即可</span></span><br><span class="line">			<span class="keyword">if</span> old&gt;&gt;mutexWaiterShift == <span class="number">0</span> || old&amp;(mutexLocked|mutexWoken|mutexStarving) != <span class="number">0</span> &#123;</span><br><span class="line">				<span class="keyword">return</span></span><br><span class="line">			&#125;</span><br><span class="line">			<span class="comment">// 否则唤醒一个协程，让这个协程参与到锁竞争中去</span></span><br><span class="line">			<span class="built_in">new</span> = (old - <span class="number">1</span>&lt;&lt;mutexWaiterShift) | mutexWoken</span><br><span class="line">			<span class="keyword">if</span> atomic.CompareAndSwapInt32(&amp;m.state, old, <span class="built_in">new</span>) &#123;</span><br><span class="line">				runtime_Semrelease(&amp;m.sema, <span class="literal">false</span>, <span class="number">1</span>)</span><br><span class="line">				<span class="keyword">return</span></span><br><span class="line">			&#125;</span><br><span class="line">			old = m.state</span><br><span class="line">		&#125;</span><br><span class="line">	&#125; <span class="keyword">else</span> &#123;</span><br><span class="line">		<span class="comment">// 饥饿模式下直接唤醒一个协程，waiter 的修改交给协程自己来做</span></span><br><span class="line">		runtime_Semrelease(&amp;m.sema, <span class="literal">true</span>, <span class="number">1</span>)</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h1 id="3-RWMutex"><a href="#3-RWMutex" class="headerlink" title="3. RWMutex"></a>3. RWMutex</h1><h2 id="3-1-基本原理"><a href="#3-1-基本原理" class="headerlink" title="3.1. 基本原理"></a>3.1. 基本原理</h2><h2 id="3-2-核心数据结构"><a href="#3-2-核心数据结构" class="headerlink" title="3.2. 核心数据结构"></a>3.2. 核心数据结构</h2><h2 id="3-3-写锁加锁过程"><a href="#3-3-写锁加锁过程" class="headerlink" title="3.3. 写锁加锁过程"></a>3.3. 写锁加锁过程</h2><h2 id="3-4-写锁解锁过程"><a href="#3-4-写锁解锁过程" class="headerlink" title="3.4. 写锁解锁过程"></a>3.4. 写锁解锁过程</h2><h2 id="3-5-读锁加锁过程"><a href="#3-5-读锁加锁过程" class="headerlink" title="3.5. 读锁加锁过程"></a>3.5. 读锁加锁过程</h2><h2 id="3-6-读锁解锁过程"><a href="#3-6-读锁解锁过程" class="headerlink" title="3.6. 读锁解锁过程"></a>3.6. 读锁解锁过程</h2><h1 id="4-WaitGroup"><a href="#4-WaitGroup" class="headerlink" title="4. WaitGroup"></a>4. WaitGroup</h1><h2 id="4-1-基本原理"><a href="#4-1-基本原理" class="headerlink" title="4.1. 基本原理"></a>4.1. 基本原理</h2><h2 id="4-2-核心数据结构"><a href="#4-2-核心数据结构" class="headerlink" title="4.2. 核心数据结构"></a>4.2. 核心数据结构</h2><h2 id="4-3-Add-Done-过程"><a href="#4-3-Add-Done-过程" class="headerlink" title="4.3. Add/Done 过程"></a>4.3. Add/Done 过程</h2><h2 id="4-4-Wait-过程"><a href="#4-4-Wait-过程" class="headerlink" title="4.4. Wait 过程"></a>4.4. Wait 过程</h2>
+      </div>
+      
+        <br>
+        
+
+
+  <section class='meta' id="footer-meta">
+    <div class='new-meta-box'>
+      
+        
+          <div class="new-meta-item date" itemprop="dateUpdated" datetime="2023-07-02T00:21:13+08:00">
+  <a class='notlink'>
+    <i class="fas fa-clock" aria-hidden="true"></i>
+    <p>更新于 2023年7月2日</p>
+  </a>
+</div>
+
+        
+      
+        
+          
+
+        
+      
+        
+          
+  <div class="new-meta-item share -mob-share-list">
+  <div class="-mob-share-list share-body">
+    
+      
+        <a class="-mob-share-qq" title="QQ好友" rel="external nofollow noopener noreferrer"
+          
+          href="http://connect.qq.com/widget/shareqq/index.html?url=/2023/07/01/golang-sync-package-v2/&title=sync 标准库部分内容源码解读 | Hygao Blog&summary="
+          
+          >
+          
+            <img src="https://cdn.jsdelivr.net/gh/xaoxuu/assets@19.1.9/logo/128/qq.png">
+          
+        </a>
+      
+    
+      
+        <a class="-mob-share-qzone" title="QQ空间" rel="external nofollow noopener noreferrer"
+          
+          href="https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=/2023/07/01/golang-sync-package-v2/&title=sync 标准库部分内容源码解读 | Hygao Blog&summary="
+          
+          >
+          
+            <img src="https://cdn.jsdelivr.net/gh/xaoxuu/assets@19.1.9/logo/128/qzone.png">
+          
+        </a>
+      
+    
+      
+        <a class="-mob-share-weibo" title="微博" rel="external nofollow noopener noreferrer"
+          
+          href="http://service.weibo.com/share/share.php?url=/2023/07/01/golang-sync-package-v2/&title=sync 标准库部分内容源码解读 | Hygao Blog&summary="
+          
+          >
+          
+            <img src="https://cdn.jsdelivr.net/gh/xaoxuu/assets@19.1.9/logo/128/weibo.png">
+          
+        </a>
+      
+    
+  </div>
+</div>
+
+
+
+        
+      
+    </div>
+  </section>
+
+
+      
+      
+          <div class="prev-next">
+              
+              
+                  <section class="next">
+                      <span class="art-item-right" aria-hidden="true">
+                          <h6>下一页&nbsp;<i class="fas fa-chevron-right" aria-hidden="true"></i></h6>
+                          <h4>
+                              <a href="/2023/06/11/golang-channel-src/" rel="prev" title="浅析 golang channel 源码">
+                                  
+                                      浅析 golang channel 源码
+                                  
+                              </a>
+                          </h4>
+                          
+                      </span>
+                  </section>
+              
+          </div>
+      
+    </section>
+  </article>
+
+
+
+  <!-- 显示推荐文章和评论 -->
+
+
+
+  
+
+
+
+
+
+
+<!-- 根据页面mathjax变量决定是否加载MathJax数学公式js -->
+
+
+
+  <script>
+    window.subData = {
+      title: 'sync 标准库部分内容源码解读',
+      tools: true
+    }
+  </script>
+
+
+</div>
+<aside class='l_side'>
+  
+    
+    
+      
+      
+        
+          
+          
+            
+              <section class='widget author'>
+  <div class='content pure'>
+    
+      <div class='avatar'>
+        <img class='avatar' src='/images/avatar.jpg'/>
+      </div>
+    
+    
+    
+      <div class="social-wrapper">
+        
+          
+            <a href="mailto:2027195958@qq.com"
+              class="social fas fa-envelope flat-btn"
+              target="_blank"
+              rel="external nofollow noopener noreferrer">
+            </a>
+          
+        
+          
+            <a href="https://github.com/wqvoon"
+              class="social fab fa-github flat-btn"
+              target="_blank"
+              rel="external nofollow noopener noreferrer">
+            </a>
+          
+        
+          
+            <a href="https://music.163.com/#/user/home?id=1731490938"
+              class="social fas fa-headphones-alt flat-btn"
+              target="_blank"
+              rel="external nofollow noopener noreferrer">
+            </a>
+          
+        
+      </div>
+    
+  </div>
+</section>
+
+            
+          
+        
+          
+          
+        
+          
+          
+        
+      
+        
+          
+          
+        
+          
+          
+        
+          
+          
+        
+      
+        
+          
+          
+        
+          
+          
+        
+          
+          
+        
+      
+        
+          
+          
+        
+          
+          
+            
+              
+  <section class='widget category'>
+    
+<header class='pure'>
+  <div><i class="fas fa-folder-open fa-fw" aria-hidden="true"></i>&nbsp;&nbsp;文章分类</div>
+  
+    <a class="rightBtn"
+    
+      rel="nofollow"
+    
+    
+    href="/categories/"
+    title="categories/">
+    <i class="fas fa-expand-arrows-alt fa-fw"></i></a>
+  
+</header>
+
+    <div class='content pure'>
+      <ul class="entry">
+        
+          <li><a class="flat-box" title="/categories/CTF/" href="/categories/CTF/"><div class='name'>CTF</div><div class='badge'>(2)</div></a></li>
+        
+          <li><a class="flat-box" title="/categories/Docker/" href="/categories/Docker/"><div class='name'>Docker</div><div class='badge'>(2)</div></a></li>
+        
+          <li><a class="flat-box" title="/categories/Golang/" href="/categories/Golang/"><div class='name'>Golang</div><div class='badge'>(12)</div></a></li>
+        
+          <li><a class="flat-box" title="/categories/分布式/" href="/categories/分布式/"><div class='name'>分布式</div><div class='badge'>(6)</div></a></li>
+        
+          <li><a class="flat-box" title="/categories/前端/" href="/categories/前端/"><div class='name'>前端</div><div class='badge'>(5)</div></a></li>
+        
+          <li><a class="flat-box" title="/categories/存储/" href="/categories/存储/"><div class='name'>存储</div><div class='badge'>(3)</div></a></li>
+        
+          <li><a class="flat-box" title="/categories/杂项/" href="/categories/杂项/"><div class='name'>杂项</div><div class='badge'>(1)</div></a></li>
+        
+          <li><a class="flat-box" title="/categories/网络/" href="/categories/网络/"><div class='name'>网络</div><div class='badge'>(2)</div></a></li>
+        
+          <li><a class="flat-box" title="/categories/论文/" href="/categories/论文/"><div class='name'>论文</div><div class='badge'>(6)</div></a></li>
+        
+          <li><a class="flat-box" title="/categories/设计模式/" href="/categories/设计模式/"><div class='name'>设计模式</div><div class='badge'>(2)</div></a></li>
+        
+      </ul>
+    </div>
+  </section>
+
+
+            
+          
+        
+          
+          
+        
+      
+        
+          
+          
+        
+          
+          
+        
+          
+          
+            
+              
+
+            
+          
+        
+      
+        
+          
+          
+        
+          
+          
+        
+          
+          
+        
+      
+        
+          
+          
+        
+          
+          
+        
+          
+          
+        
+      
+    
+
+  
+</aside>
+
+<footer id="footer" class="clearfix">
+  
+  
+    <div class="social-wrapper">
+      
+        
+          <a href="mailto:2027195958@qq.com"
+            class="social fas fa-envelope flat-btn"
+            target="_blank"
+            rel="external nofollow noopener noreferrer">
+          </a>
+        
+      
+        
+          <a href="https://github.com/wqvoon"
+            class="social fab fa-github flat-btn"
+            target="_blank"
+            rel="external nofollow noopener noreferrer">
+          </a>
+        
+      
+        
+          <a href="https://music.163.com/#/user/home?id=1731490938"
+            class="social fas fa-headphones-alt flat-btn"
+            target="_blank"
+            rel="external nofollow noopener noreferrer">
+          </a>
+        
+      
+    </div>
+  
+  <br>
+  <div><p>博客内容遵循 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/deed.zh">署名-非商业性使用-相同方式共享 4.0 国际 (CC BY-NC-SA 4.0) 协议</a></p>
+</div>
+  <div>
+    本站使用
+    <a href="https://xaoxuu.com/wiki/material-x/" target="_blank" class="codename">Material X</a>
+    作为主题
+    
+      ，
+      总访问量为
+      <span id="busuanzi_value_site_pv"><i class="fas fa-spinner fa-spin fa-fw" aria-hidden="true"></i></span>
+      次
+    
+    。
+  </div>
+</footer>
+<script>setLoadingBarProgress(80);</script>
+
+
+      <script>setLoadingBarProgress(60);</script>
+    </div>
+    <a class="s-top fas fa-arrow-up fa-fw" href='javascript:void(0)'></a>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script>
+
+  <script>
+    var GOOGLE_CUSTOM_SEARCH_API_KEY = "";
+    var GOOGLE_CUSTOM_SEARCH_ENGINE_ID = "";
+    var ALGOLIA_API_KEY = "";
+    var ALGOLIA_APP_ID = "";
+    var ALGOLIA_INDEX_NAME = "";
+    var AZURE_SERVICE_NAME = "";
+    var AZURE_INDEX_NAME = "";
+    var AZURE_QUERY_KEY = "";
+    var BAIDU_API_ID = "";
+    var SEARCH_SERVICE = "hexo" || "hexo";
+    var ROOT = "/"||"/";
+    if(!ROOT.endsWith('/'))ROOT += '/';
+  </script>
+
+<script src="//instant.page/1.2.2" type="module" integrity="sha384-2xV8M5griQmzyiY3CDqh1dn4z3llDVqZDqzjzcY+jCBCk/a5fXJmuZ/40JJAPeoU"></script>
+
+
+  <script async src="https://cdn.jsdelivr.net/npm/scrollreveal@4.0.5/dist/scrollreveal.min.js"></script>
+  <script type="text/javascript">
+    $(function() {
+      const $reveal = $('.reveal');
+      if ($reveal.length === 0) return;
+      const sr = ScrollReveal({ distance: 0 });
+      sr.reveal('.reveal');
+    });
+  </script>
+
+
+  <script src="https://cdn.jsdelivr.net/npm/node-waves@0.7.6/dist/waves.min.js"></script>
+  <script type="text/javascript">
+    $(function() {
+      Waves.attach('.flat-btn', ['waves-button']);
+      Waves.attach('.float-btn', ['waves-button', 'waves-float']);
+      Waves.attach('.float-btn-light', ['waves-button', 'waves-float', 'waves-light']);
+      Waves.attach('.flat-box', ['waves-block']);
+      Waves.attach('.float-box', ['waves-block', 'waves-float']);
+      Waves.attach('.waves-image');
+      Waves.init();
+    });
+  </script>
+
+
+  <script async src="https://cdn.jsdelivr.net/gh/xaoxuu/cdn-busuanzi@2.3/js/busuanzi.pure.mini.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <script src="https://cdn.jsdelivr.net/gh/xaoxuu/cdn-material-x@19.9/js/app.js"></script>
+
+
+  <script src="https://cdn.jsdelivr.net/gh/xaoxuu/cdn-material-x@19.9/js/search.js"></script>
+
+
+
+
+<!-- 复制 -->
+<script src="https://cdn.jsdelivr.net/npm/clipboard@2/dist/clipboard.min.js"></script>
+<script>
+  let COPY_SUCCESS = "复制成功";
+  let COPY_FAILURE = "复制失败";
+  /*页面载入完成后，创建复制按钮*/
+  !function (e, t, a) {
+    /* code */
+    var initCopyCode = function(){
+      var copyHtml = '';
+      copyHtml += '<button class="btn-copy" data-clipboard-snippet="">';
+      copyHtml += '  <i class="fa fa-copy"></i><span>复制</span>';
+      copyHtml += '</button>';
+      $(".highlight .code pre").before(copyHtml);
+      var clipboard = new ClipboardJS('.btn-copy', {
+        target: function(trigger) {
+          return trigger.nextElementSibling;
+        }
+      });
+
+      clipboard.on('success', function(e) {
+        //您可以加入成功提示
+        console.info('Action:', e.action);
+        console.info('Text:', e.text);
+        console.info('Trigger:', e.trigger);
+        success_prompt(COPY_SUCCESS);
+        e.clearSelection();
+      });
+      clipboard.on('error', function(e) {
+        //您可以加入失败提示
+        console.error('Action:', e.action);
+        console.error('Trigger:', e.trigger);
+        fail_prompt(COPY_FAILURE);
+      });
+    }
+    initCopyCode();
+
+  }(window, document);
+
+  /**
+   * 弹出式提示框，默认1.5秒自动消失
+   * @param message 提示信息
+   * @param style 提示样式，有alert-success、alert-danger、alert-warning、alert-info
+   * @param time 消失时间
+   */
+  var prompt = function (message, style, time)
+  {
+      style = (style === undefined) ? 'alert-success' : style;
+      time = (time === undefined) ? 1500 : time*1000;
+      $('<div>')
+          .appendTo('body')
+          .addClass('alert ' + style)
+          .html(message)
+          .show()
+          .delay(time)
+          .fadeOut();
+  };
+
+  // 成功提示
+  var success_prompt = function(message, time)
+  {
+      prompt(message, 'alert-success', time);
+  };
+
+  // 失败提示
+  var fail_prompt = function(message, time)
+  {
+      prompt(message, 'alert-danger', time);
+  };
+
+  // 提醒
+  var warning_prompt = function(message, time)
+  {
+      prompt(message, 'alert-warning', time);
+  };
+
+  // 信息提示
+  var info_prompt = function(message, time)
+  {
+      prompt(message, 'alert-info', time);
+  };
+
+</script>
+
+
+<!-- fancybox -->
+<script src="https://cdn.jsdelivr.net/gh/fancyapps/fancybox@3.5.7/dist/jquery.fancybox.min.js"></script>
+<script>
+  let LAZY_LOAD_IMAGE = "";
+  $(".article-entry").find("fancybox").find("img").each(function () {
+      var element = document.createElement("a");
+      $(element).attr("data-fancybox", "gallery");
+      $(element).attr("href", $(this).attr("src"));
+      /* 图片采用懒加载处理时,
+       * 一般图片标签内会有个属性名来存放图片的真实地址，比如 data-original,
+       * 那么此处将原本的属性名src替换为对应属性名data-original,
+       * 修改如下
+       */
+       if (LAZY_LOAD_IMAGE) {
+         $(element).attr("href", $(this).attr("data-original"));
+       }
+      $(this).wrap(element);
+  });
+</script>
+
+
+
+
+
+  <script>setLoadingBarProgress(100);</script>
+</body>
+</html>
