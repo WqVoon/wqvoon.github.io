@@ -4,6 +4,25 @@
   
     
     <entry>
+      <title>finalizer 与内存泄漏与 gc tuner</title>
+      <link href="/2023/07/26/golang-finalizer/"/>
+      <url>/2023/07/26/golang-finalizer/</url>
+      
+        <content type="html"><![CDATA[<h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><h1 id="概述"><a href="#概述" class="headerlink" title="概述"></a>概述</h1><h1 id="设置与取消设置-Finalizer"><a href="#设置与取消设置-Finalizer" class="headerlink" title="设置与取消设置 Finalizer"></a>设置与取消设置 Finalizer</h1><h1 id="执行-Finalizer"><a href="#执行-Finalizer" class="headerlink" title="执行 Finalizer"></a>执行 Finalizer</h1><h1 id="Finalizer-的一些问题"><a href="#Finalizer-的一些问题" class="headerlink" title="Finalizer 的一些问题"></a>Finalizer 的一些问题</h1><h1 id="GC-Tuner-对-Finalizer-的应用"><a href="#GC-Tuner-对-Finalizer-的应用" class="headerlink" title="GC Tuner 对 Finalizer 的应用"></a>GC Tuner 对 Finalizer 的应用</h1>]]></content>
+      
+      
+      <categories>
+          
+          <category> Golang </category>
+          
+      </categories>
+      
+      
+    </entry>
+    
+    
+    
+    <entry>
       <title>sync 标准库部分内容源码解读</title>
       <link href="/2023/07/01/golang-sync-package-v2/"/>
       <url>/2023/07/01/golang-sync-package-v2/</url>
