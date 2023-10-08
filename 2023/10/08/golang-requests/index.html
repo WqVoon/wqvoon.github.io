@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   
-  <title>bytedance/gopkg 中 gopool 的源码解读 | Hygao Blog</title>
+  <title>golang requests 源码解读 | Hygao Blog</title>
   
   
-  <meta name="description" content="趁热打铁，读完连接池读协程池">
+  <meta name="description" content="本文对 github.com/carlmjohnson/requests 的 v0.21.11 版本源码进行说明">
   
 
   
@@ -298,8 +298,8 @@
         
   
     <h1 class="title">
-      <a href="/2023/04/16/GoPool/">
-        bytedance/gopkg 中 gopool 的源码解读
+      <a href="/2023/10/08/golang-requests/">
+        golang requests 源码解读
       </a>
     </h1>
   
@@ -330,7 +330,7 @@
             <div class="new-meta-item date">
   <a class='notlink'>
     <i class="fas fa-calendar-alt" aria-hidden="true"></i>
-    <p>2023-04-16</p>
+    <p>2023-10-08</p>
   </a>
 </div>
 
@@ -382,24 +382,44 @@
 
     <section class="article typo">
       <div class="article-entry" itemprop="articleBody">
-        <h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><p>前几天从连接池的角度阅读了标准库中 database/sql 的源码，并写了对应的<a href="/2023/04/12/SqlConnectionPool/">博客</a>做总结。最近逛 github 时看到字节开源的 gopkg 代码库中有一个叫 <a href="https://github.com/bytedance/gopkg/tree/develop/util/gopool" target="_blank" rel="noopener">gopool</a> 的协程池实现，代码只有 200 多行，感觉还蛮有意思的，于是就有了现在的这篇文章。</p>
-<h1 id="功能简述"><a href="#功能简述" class="headerlink" title="功能简述"></a>功能简述</h1><p>根据 readme 来看，gopool 的目标是作为 go 关键字的一个可选方案，具体来说，它对外暴露了 gopool.Go 这个函数，内部接收一个函数作为入参，这个函数不接受任何参数也不返回任何内容，但因为 golang 本身有闭包的特性，所以这并不影响使用。</p>
-<p>我个人非常喜欢 gopool 对外暴露的接口，因为它与 golang 本身的相似性使得使用起来时几乎没有什么心智负担。还是以 gopool.Go 函数为例，同 go 关键字相同，这个作为入参的函数是异步执行的，而且调用方也不会因为这个函数调用而阻塞。为了达成这个效果，gopool 不能真的起一个 goroutine，取而代之的，它用了类似 js 的任务队列的方式，因为它本身是做协程池的，如果每调一次 gopool.Go 就创建一个新协程，那这个函数就没意义了。</p>
-<p>最后，gopool 处理了协程内部的 panic。这点很重要，因为如果你使用了某个框架来开发应用，那么你的主流程的 panic 很可能可以被这个框架捕获并优雅处理，从而保证应用整体不会因为这个 panic 而崩溃，但如果你在主流程中启动了新的协程，这个协程的 panic 就需要由你自己来保证了，而这项工作通常是重复且枯燥的，gopool.Go 在这点上提供了一种侵入性很低的解决方案。</p>
-<h1 id="源码解读"><a href="#源码解读" class="headerlink" title="源码解读"></a>源码解读</h1><p>接下来把视角回到代码本身，上面介绍的 <a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/gopool.go#L36-L43" target="_blank" rel="noopener">gopool.Go</a> 函数其实是对全局 <a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/gopool.go#L23-L24" target="_blank" rel="noopener">defaultPool</a> 变量的 CtxGo 方法的调用（golang 标准库中有很多函数也是类似的实现方式，比如 net/http 的 client 和 handler），所以如果要了解原理，就需要看 defaultPool 本身是什么。</p>
-<p>从定义上看，defaultPool 是一个 <a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/pool.go#L23-L36" target="_blank" rel="noopener">Pool</a> 接口的实例，由 <a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/pool.go#L93-L101" target="_blank" rel="noopener">NewPool</a> 函数初始化，这个函数的功能很简单，它根据入参构造了一个 <a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/pool.go#L72-L91" target="_blank" rel="noopener">pool</a> 结构，然后将这个结构返回。pool 结构是 Pool 接口的一个实现，它的定义是下面这样的：</p>
-<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">type</span> pool <span class="keyword">struct</span> &#123;</span><br><span class="line">	<span class="comment">// 协程池的名字，有 Name 方法可以返回</span></span><br><span class="line">	name <span class="keyword">string</span></span><br><span class="line"></span><br><span class="line">	<span class="comment">// 这个协程池同时最多允许多少 worker 存在</span></span><br><span class="line">	<span class="built_in">cap</span> <span class="keyword">int32</span></span><br><span class="line">  </span><br><span class="line">	<span class="comment">// 配置信息，目前只有一个阈值的属性，具体见下文</span></span><br><span class="line">	config *Config</span><br><span class="line">  </span><br><span class="line">	<span class="comment">// task 队列的元信息，每一个 task 代表一个待执行的函数</span></span><br><span class="line">	taskHead  *task</span><br><span class="line">	taskTail  *task</span><br><span class="line">	taskLock  sync.Mutex</span><br><span class="line">	taskCount <span class="keyword">int32</span></span><br><span class="line"></span><br><span class="line">	<span class="comment">// 当前有多少个 worker 在运行中，每个 worker 代表一个 goroutine</span></span><br><span class="line">	workerCount <span class="keyword">int32</span></span><br><span class="line"></span><br><span class="line">	<span class="comment">// 由这个协程池中的协程引发的 panic 会由该函数处理</span></span><br><span class="line">	panicHandler <span class="function"><span class="keyword">func</span><span class="params">(context.Context, <span class="keyword">interface</span>&#123;&#125;)</span></span></span><br><span class="line"><span class="function">&#125;</span></span><br></pre></td></tr></table></figure>
+        <h1 id="1-前言"><a href="#1-前言" class="headerlink" title="1. 前言"></a>1. 前言</h1><p>最近在公司做项目时要调用平台提供的大量 openAPI，尽管 golang 的 http 标准库能够满足需求，但为了实现功能需要写很长的代码，读起来也不是很舒服，所以就想在 github 上找找标准库的封装。想起很久前学 python 时学过的 requests 库，抱着试一试的心态搜索了一下，结果居然真的有 golang 版本的同名库。对着 readme 学了下，发现使用方式还真的蛮 gopher 的，作者还写了<a href="https://blog.carlmjohnson.net/post/2021/requests-golang-http-client/" target="_blank" rel="noopener">一篇博客</a>描述了自己的一些设计取舍，也非常有意思。</p>
+<p>下面是一个发送 GET 请求时，使用标准库与 requests 对比的例子：</p>
+<table>
+<thead>
+<tr>
+<th><strong>标准库</strong></th>
+<th><strong>requests</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
 
-<p>所以从这个定义我们能知道，如果把 pool 看作是一个可操作单元，那么它内部维护了一个 task 的队列（通过链表来实现），其中的每个 task 结构代表一个待执行的函数，除此之外，它还对应多个 worker，这些 worker 从 task 中获取函数并执行。总结来说，pool.CtxGo 方法是 task 的生产者，worker 则是 task 的消费者，两者的交互通过 task 链表来完成。</p>
-<p>下面我们直接来看 pool.CtxGo 这个方法，它也是协程池的核心方法，它的定义是这样的：</p>
-<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(p *pool)</span> <span class="title">CtxGo</span><span class="params">(ctx context.Context, f <span class="keyword">func</span>()</span>)</span> &#123;</span><br><span class="line">  <span class="comment">// 从 taskPool 中取一个 task 结构体，通过复用结构体来减少 gc 压力</span></span><br><span class="line">	t := taskPool.Get().(*task)</span><br><span class="line">  </span><br><span class="line">  <span class="comment">// 使用入参来初始化 task 结构</span></span><br><span class="line">	t.ctx = ctx</span><br><span class="line">	t.f = f</span><br><span class="line">  </span><br><span class="line">  <span class="comment">// 通过加锁将 task 并发安全地放在队列的尾部，并更新队列长度</span></span><br><span class="line">	p.taskLock.Lock()</span><br><span class="line">	<span class="keyword">if</span> p.taskHead == <span class="literal">nil</span> &#123;</span><br><span class="line">		p.taskHead = t</span><br><span class="line">		p.taskTail = t</span><br><span class="line">	&#125; <span class="keyword">else</span> &#123;</span><br><span class="line">		p.taskTail.next = t</span><br><span class="line">		p.taskTail = t</span><br><span class="line">	&#125;</span><br><span class="line">	p.taskLock.Unlock()</span><br><span class="line">	atomic.AddInt32(&amp;p.taskCount, <span class="number">1</span>)</span><br><span class="line">  </span><br><span class="line">	<span class="comment">// 满足条件时，从 workerPool 中取一个 worker 结构并在初始化后调用其 run 方法</span></span><br><span class="line">	<span class="keyword">if</span> (atomic.LoadInt32(&amp;p.taskCount) &gt;= p.config.ScaleThreshold &amp;&amp; p.WorkerCount() &lt; atomic.LoadInt32(&amp;p.<span class="built_in">cap</span>)) || p.WorkerCount() == <span class="number">0</span> &#123;</span><br><span class="line">		p.incWorkerCount()</span><br><span class="line">		w := workerPool.Get().(*worker)</span><br><span class="line">		w.pool = p</span><br><span class="line">		w.run()</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
-<p>在 gopool 中，task 和 worker 都通过 sync.Pool 来实现复用。当拿到一个可用的 task 结构后，pool.CtxGo 会将它放入 task 队列的尾部，然后判断一些条件，如果满足就获取一个可用的 worker 并调用其 run 方法，否则直接退出函数。所以整个过程中与入参的 f（也就是用户希望通过 goroutine 执行的函数）的关系其实只在于将它加入到链表中，f 在 pool.CtxGo 中并没有被执行到。</p>
-<p>worker 是真正干活的部分，它在 worker.pool 字段中保存了自己当前负责处理的 pool 结构，所以它也能间接访问到这个 pool 中的 task 链表。而它的核心方法是 <a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/worker.go#L40-L74" target="_blank" rel="noopener">worker.run</a>。可以发现，这个方法整体就是一个普通的 goroutine，内部有一个 for 循环，循环内首先尝试从 pool 的 task 链表中获取一个任务，如果拿到的是 nil，那么说明当前 pool 内没有要执行的 task，此时会做一些收尾工作并结束整个 goroutine 的运行。而如果获取到了 task，那么它会调用其内部的 f，这个 f 对应用户传入的某个待运行的函数。执行完毕后，这个 task 会被回收到 taskPool 中供未来复用。</p>
-<p>如果某个 task 执行时发生 panic，这个 panic 会被捕获，此时如果用户通过 <a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/pool.go#L141-L144" target="_blank" rel="noopener">pool.SetPanicHandler</a> 设置了 pool.panicHandler，那么 recover 返回的内容会被传递给这个函数，方便用户自己做一些自定义的操作。</p>
-<p>这里需要注意的是，为了实现 panic 的捕获，worker.run 在 for 循环内部起了一个<a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/worker.go#L58-L70" target="_blank" rel="noopener">立即执行表达式</a>，并在内部通过 defer 来做 panic 的 recover。这是必要的，因为只有这样它才能把 panic 的影响限制在单个 task 上。否则如果放在 worker.run 的一开始，那么当某个 task panic 时整个 worker.run 函数就会结束，其他的 task 就没办法被继续执行了；而如果放在内部的 goroutine 中，worker.run 就需要在 goroutine 异常退出时创建一个新的 goroutine，这就需要引入更多的 goroutine 来做监控，因为 worker.run 本身的执行是一定不能阻塞的，否则对外暴露的 gopool.Go 就会阻塞，这就与 go 关键字的行为不一致了。</p>
-<p>到此为止，我们就基本梳理完了协程池中 task 的创建与消费，但如果你回头看 pool 的定义，会发现它 cap 和 config 的字段没有提到，因为 pool.CtxGo 中 <a href="https://github.com/bytedance/gopkg/blob/develop/util/gopool/pool.go#L133" target="_blank" rel="noopener">if</a> 的条件我们也还没有分析。先说结论，一个 worker 就有能力消费掉 pool 中的所有 task，虽然这个消费的过程与主流程是异步的，但它自己内部其实是串行的，这意味着如果执行某个 task 需要花很长的时间，那么后面的 task 都要等这个 task 执行完才能继续被执行，所以为了解决这个问题，我们就需要有多个 worker 来一起并发消费 pool 中的 task。但通过前面的分析我们知道，一个 worker 对应一个 goroutine，而 gopool 是做协程池的，所以它必须要能够限制 goroutine 的数量。</p>
-<p>所以总结来说，我们既需要在 task 数量达到某个值时创建新的 worker 来避免所有的 task 串行执行，又需要限制 worker 的数量不能超过某个值。这个需求就是通过前面被我们跳过的 if 来实现的，具体来说，pool.config.ScaleThreshold 定义了一个下限，当 task 的数量大于等于这个值时，新的 worker 可能会被创建，而 pool.cap 定义了一个上限，它要求 worker 的总数不能超过这个值，这两个条件同时配合起来，就能够满足我们的要求了。</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line">req, err := http.NewRequestWithContext(ctx, </span><br><span class="line">	http.MethodGet, <span class="string">"http://example.com"</span>, <span class="literal">nil</span>)</span><br><span class="line"><span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">	<span class="comment">// ...</span></span><br><span class="line">&#125;</span><br><span class="line">res, err := http.DefaultClient.Do(req)</span><br><span class="line"><span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">	<span class="comment">// ...</span></span><br><span class="line">&#125;</span><br><span class="line"><span class="keyword">defer</span> res.Body.Close()</span><br><span class="line">b, err := io.ReadAll(res.Body)</span><br><span class="line"><span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">	<span class="comment">// ...</span></span><br><span class="line">&#125;</span><br><span class="line">s := <span class="keyword">string</span>(b)</span><br></pre></td></tr></table></figure>
+
+</td>
+<td>
+
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">var</span> s <span class="keyword">string</span></span><br><span class="line">err := requests.</span><br><span class="line">	URL(<span class="string">"http://example.com"</span>).</span><br><span class="line">	ToString(&amp;s).</span><br><span class="line">	Fetch(ctx)</span><br></pre></td></tr></table></figure>
+
+</td>
+</tr>
+<tr><td>需要 15+ 行</td><td>需要 5 行</td></tr>
+</tbody>
+</table>
+
+<p>可以看到对比起来，requests 版本的代码还是非常简单清晰的。</p>
+<h1 id="2-源码解读"><a href="#2-源码解读" class="headerlink" title="2. 源码解读"></a>2. 源码解读</h1><h2 id="2-1-fetch-主流程"><a href="#2-1-fetch-主流程" class="headerlink" title="2.1. fetch 主流程"></a>2.1. fetch 主流程</h2><p>从上面的代码中可以看到，requests 发起请求时可以用链式调用的方式声明请求中的内容以及如何处理响应，这个链式调用以 <code>requests.URL</code> 开始，经过一系列的配置后，在 <code>Fetch</code> 调用处发起 http 请求。<code>requests.URL</code> 方法的定义非常简单，它构建了一个 <code>Builder</code> 的结构体，并将其 baseurl 字段设置为 <code>requests.URL</code> 方法的入参，而这个结构体的完整定义如下：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">type</span> Builder <span class="keyword">struct</span> &#123;</span><br><span class="line">	baseurl      <span class="keyword">string</span> <span class="comment">// 请求的基础链接，这里可以只写一部分，也可以直接写完整的链接</span></span><br><span class="line">	scheme, host <span class="keyword">string</span> <span class="comment">// 如果有值则会覆盖 .baseurl 解析出的内容，比如 baseurl 是 http 请求，这里可以将 scheme 设置成 https</span></span><br><span class="line">	paths        []<span class="keyword">string</span> <span class="comment">// 请求链接中 baseurl 之后的部分，可以写多个，会用 path.Join 拼接起来</span></span><br><span class="line">	params       []multimap <span class="comment">// 请求的 query 参数</span></span><br><span class="line">	headers      []multimap <span class="comment">// 请求头中的各个字段，key 会经过 http.CanonicalHeaderKey 的包装</span></span><br><span class="line">	getBody      BodyGetter <span class="comment">// 定义如何构造请求中的 body，是一个函数</span></span><br><span class="line">	method       <span class="keyword">string</span> <span class="comment">// 请求方法，默认是 GET</span></span><br><span class="line">	cl           *http.Client <span class="comment">// 使用哪个 http.Client 发起请求，默认是 http.DefaultClient</span></span><br><span class="line">	validators   []ResponseHandler <span class="comment">// 在 .handler 之前调用的一系列函数，通常用来校验一些内容</span></span><br><span class="line">	handler      ResponseHandler <span class="comment">// 定义如何处理响应体中的内容，是一个函数</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>事实上，后续的一系列链式调用都是调用的这个结构体的方法，不同的方法用于填充不同的字段，然后在 <code>Fetch</code> 中以这个结构体的各个字段来构建 <code>http.Request</code> 结构并发送出去，而 <code>Fetch</code> 内部其实仅仅是调用了 <code>Request</code> 和 <code>Do</code> 两个方法，前者用于构建 <code>http.Request</code> 结构，后者则用于发送请求并处理响应，这两个函数的代码如下：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(rb *Builder)</span> <span class="title">Request</span><span class="params">(ctx context.Context)</span> <span class="params">(req *http.Request, err error)</span></span> &#123;</span><br><span class="line">	u, err := url.Parse(rb.baseurl)</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="literal">nil</span>, fmt.Errorf(<span class="string">"could not initialize with base URL %q: %w"</span>, u, err)</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">if</span> u.Scheme == <span class="string">""</span> &#123; <span class="comment">// 如果 baseurl 未提供 scheme，那么默认采用 https 协议</span></span><br><span class="line">		u.Scheme = <span class="string">"https"</span></span><br><span class="line">	&#125;</span><br><span class="line">  <span class="keyword">if</span> rb.scheme != <span class="string">""</span> &#123; <span class="comment">// Builder 的 scheme 字段优先级最高，可以通过 Scheme(string) 方法设置</span></span><br><span class="line">		u.Scheme = rb.scheme</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">if</span> rb.host != <span class="string">""</span> &#123; <span class="comment">// Builder 的 host 字段优先级最高，可以通过 Host(string) 方法设置</span></span><br><span class="line">		u.Host = rb.host</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">for</span> _, p := <span class="keyword">range</span> rb.paths &#123; <span class="comment">// 可以通过 Path 或 Pathf 方法向 paths 中加入内容</span></span><br><span class="line">		<span class="keyword">if</span> strings.HasPrefix(p, <span class="string">"/"</span>) &#123; <span class="comment">// 如果某个 path 以 / 开头，那么重新计算完整的 path</span></span><br><span class="line">			u.Path = p</span><br><span class="line">		&#125; <span class="keyword">else</span> <span class="keyword">if</span> curpath := path.Clean(u.Path); curpath == <span class="string">"."</span> || curpath == <span class="string">"/"</span> &#123;</span><br><span class="line">			u.Path = path.Clean(p)</span><br><span class="line">		&#125; <span class="keyword">else</span> &#123; <span class="comment">// 否则与已有的 path 做 Join 操作</span></span><br><span class="line">			u.Path = path.Clean(path.Join(u.Path, p))</span><br><span class="line">		&#125;</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">if</span> <span class="built_in">len</span>(rb.params) &gt; <span class="number">0</span> &#123; <span class="comment">// 如果提供了 query 参数，那么设置到 RawQuery 中</span></span><br><span class="line">    q := u.Query() <span class="comment">// 这里先从 u.Query() 中查了一下，所以 baseurl 里也可以提供 query 参数，但 Builder 中的优先级更高</span></span><br><span class="line">		<span class="keyword">for</span> _, kv := <span class="keyword">range</span> rb.params &#123;</span><br><span class="line">			q[kv.key] = kv.values</span><br><span class="line">		&#125;</span><br><span class="line">		u.RawQuery = q.Encode()</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">var</span> body io.ReadCloser</span><br><span class="line">	<span class="keyword">if</span> rb.getBody != <span class="literal">nil</span> &#123; <span class="comment">// 如果 getBody 方法不为 nil，那么调用它来获取请求体，这里后面我们会重点提到</span></span><br><span class="line">		<span class="keyword">if</span> body, err = rb.getBody(); err != <span class="literal">nil</span> &#123;</span><br><span class="line">			<span class="keyword">return</span> <span class="literal">nil</span>, err</span><br><span class="line">		&#125;</span><br><span class="line">	&#125;</span><br><span class="line">	method := http.MethodGet <span class="comment">// 默认使用 Get 方法，如果 getBody 方法不为 nil 说明有请求体，此时默认使用 Post 方法，而最终还是以 Builder 中的内容为准</span></span><br><span class="line">	<span class="keyword">if</span> rb.getBody != <span class="literal">nil</span> &#123;</span><br><span class="line">		method = http.MethodPost</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">if</span> rb.method != <span class="string">""</span> &#123;</span><br><span class="line">		method = rb.method</span><br><span class="line">	&#125;</span><br><span class="line">  <span class="comment">// 根据上面的内容构造出 http.Request 结构，在函数结束时返回它</span></span><br><span class="line">	req, err = http.NewRequestWithContext(ctx, method, u.String(), body)</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="literal">nil</span>, err</span><br><span class="line">	&#125;</span><br><span class="line">	req.GetBody = rb.getBody <span class="comment">// 这里将 getBody 赋值给了 req.GetBody，所以可能会重复调用，需要保证提供的 getBody 方法是幂等的</span></span><br><span class="line"></span><br><span class="line">	<span class="keyword">for</span> _, kv := <span class="keyword">range</span> rb.headers &#123;</span><br><span class="line">		req.Header[http.CanonicalHeaderKey(kv.key)] = kv.values</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">return</span> req, <span class="literal">nil</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(rb *Builder)</span> <span class="title">Do</span><span class="params">(req *http.Request)</span> <span class="params">(err error)</span></span> &#123;</span><br><span class="line">	cl := http.DefaultClient <span class="comment">// 默认使用 http.DefaultClient，如果 Builder 设置了 client，那么以 Builder 为准</span></span><br><span class="line">	<span class="keyword">if</span> rb.cl != <span class="literal">nil</span> &#123;</span><br><span class="line">		cl = rb.cl</span><br><span class="line">	&#125;</span><br><span class="line">	res, err := cl.Do(req) <span class="comment">// 发起请求并获取响应</span></span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> err</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">defer</span> res.Body.Close() <span class="comment">// 在函数结束时关闭 Body，这里是使用 http 标准库时很容易忽略的点，requests 帮助做了这件事</span></span><br><span class="line"></span><br><span class="line">	validators := rb.validators <span class="comment">// 在 handler 执行前先跑一遍全部 validators，如果没提供的话就只跑 DefaultValidator，在其中会校验状态码</span></span><br><span class="line">	<span class="keyword">if</span> <span class="built_in">len</span>(validators) == <span class="number">0</span> &#123;</span><br><span class="line">		validators = []ResponseHandler&#123;DefaultValidator&#125;</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">if</span> err = ChainHandlers(validators...)(res); err != <span class="literal">nil</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> err</span><br><span class="line">	&#125;</span><br><span class="line">  </span><br><span class="line">	h := consumeBody <span class="comment">// 默认使用 consumeBody 作为响应体的 handler，这个方法只是用来消费 body 中的内容但不做任何处理，可以通过 Builder 提供其他的 handler 来处理响应体</span></span><br><span class="line">	<span class="keyword">if</span> rb.handler != <span class="literal">nil</span> &#123;</span><br><span class="line">		h = rb.handler</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">if</span> err = h(res); err != <span class="literal">nil</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> err</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">return</span> <span class="literal">nil</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>TBD</p>
+<h2 id="2-2-recorder"><a href="#2-2-recorder" class="headerlink" title="2.2. recorder"></a>2.2. recorder</h2><p>TBD</p>
+<h2 id="2-3-redirects"><a href="#2-3-redirects" class="headerlink" title="2.3. redirects"></a>2.3. redirects</h2><p>TBD</p>
+<h2 id="2-4-transport"><a href="#2-4-transport" class="headerlink" title="2.4. transport"></a>2.4. transport</h2><p>TBD</p>
 
       </div>
       
@@ -433,7 +453,7 @@
       
         <a class="-mob-share-qq" title="QQ好友" rel="external nofollow noopener noreferrer"
           
-          href="http://connect.qq.com/widget/shareqq/index.html?url=/2023/04/16/GoPool/&title=bytedance/gopkg 中 gopool 的源码解读 | Hygao Blog&summary="
+          href="http://connect.qq.com/widget/shareqq/index.html?url=/2023/10/08/golang-requests/&title=golang requests 源码解读 | Hygao Blog&summary="
           
           >
           
@@ -445,7 +465,7 @@
       
         <a class="-mob-share-qzone" title="QQ空间" rel="external nofollow noopener noreferrer"
           
-          href="https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=/2023/04/16/GoPool/&title=bytedance/gopkg 中 gopool 的源码解读 | Hygao Blog&summary="
+          href="https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshare_onekey?url=/2023/10/08/golang-requests/&title=golang requests 源码解读 | Hygao Blog&summary="
           
           >
           
@@ -457,7 +477,7 @@
       
         <a class="-mob-share-weibo" title="微博" rel="external nofollow noopener noreferrer"
           
-          href="http://service.weibo.com/share/share.php?url=/2023/04/16/GoPool/&title=bytedance/gopkg 中 gopool 的源码解读 | Hygao Blog&summary="
+          href="http://service.weibo.com/share/share.php?url=/2023/10/08/golang-requests/&title=golang requests 源码解读 | Hygao Blog&summary="
           
           >
           
@@ -481,28 +501,14 @@
       
           <div class="prev-next">
               
-                  <section class="prev">
-                      <span class="art-item-left">
-                          <h6><i class="fas fa-chevron-left" aria-hidden="true"></i>&nbsp;上一页</h6>
-                          <h4>
-                              <a href="/2023/05/13/go-modules-lib/" rel="prev" title="关于 go modules 的一个小实验">
-                                
-                                    关于 go modules 的一个小实验
-                                
-                              </a>
-                          </h4>
-                          
-                      </span>
-                  </section>
-              
               
                   <section class="next">
                       <span class="art-item-right" aria-hidden="true">
                           <h6>下一页&nbsp;<i class="fas fa-chevron-right" aria-hidden="true"></i></h6>
                           <h4>
-                              <a href="/2023/04/12/SqlConnectionPool/" rel="prev" title="从连接池的角度阅读 database/sql 包的源码">
+                              <a href="/2023/07/26/golang-finalizer/" rel="prev" title="finalizer 与内存泄漏与 gc tuner">
                                   
-                                      从连接池的角度阅读 database/sql 包的源码
+                                      finalizer 与内存泄漏与 gc tuner
                                   
                               </a>
                           </h4>
@@ -534,7 +540,7 @@
 
   <script>
     window.subData = {
-      title: 'bytedance/gopkg 中 gopool 的源码解读',
+      title: 'golang requests 源码解读',
       tools: true
     }
   </script>
