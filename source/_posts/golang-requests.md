@@ -172,22 +172,133 @@ func (rb *Builder) Do(req *http.Request) (err error) {
 }
 ```
 
+可以看到，在整个发送请求的过程中，Builder 上定义的 getBody、validators、handler 是非常关键的，它们描述了如何发送请求体与如何处理响应，而这正是一个复杂 http 请求中需要处理的事情。requests 提供了一些 helper 函数来处理一些常见的场景。
+
+
+
+### 2.1.1. BodyGetter
+
+getBody 的类型是 BodyGetter，它的具体定义为 `type BodyGetter = func() (io.ReadCloser, error)`，预期最终会返回一个 `io.ReadCloser`，这个返回值在 `Request` 方法中会作为 `http.NewRequestWithContext` 的 body 参数。
+
+所以为了传递一个具体的 body，我们可以自己实现一个 BodyGetter 函数，然后在构造请求时通过 `Builder.Body` 函数传递给 requests，但多数场景下我们可以直接使用 requests 封装好的一些 BodyGetter，这些方法在 `Builder` 结构上分别有对应的 shortcut，内部的实现很简单，都是用内置的 BodyGetter 作为参数调用 `Builder.Body`，并按需设置请求头中的内容：
+
+```go
+// 直接赋值 getBody，不判断是否已经有值，所以重复调用时以最后一次调用为准
+func (rb *Builder) Body(src BodyGetter) *Builder {
+	rb.getBody = src
+	return rb
+}
+
+// 从 reader 中获取请求体
+func (rb *Builder) BodyReader(r io.Reader) *Builder {
+	return rb.Body(BodyReader(r))
+}
+
+// 提供一个向 writer 中写入内容的函数，writer 由 requests 注入，写入的内容会收集到一个 reader 中，然后从这个 reader 中获取请求体
+func (rb *Builder) BodyWriter(f func(w io.Writer) error) *Builder {
+	return rb.Body(BodyWriter(f))
+}
+
+// 从字节切片中获取请求体
+func (rb *Builder) BodyBytes(b []byte) *Builder {
+	return rb.Body(BodyBytes(b))
+}
+
+// 将结构体序列化成 json 字符串作为请求体，并设置请求头中的 content-type
+func (rb *Builder) BodyJSON(v interface{}) *Builder {
+	return rb.
+		Body(BodyJSON(v)).
+		ContentType("application/json")
+}
+
+// 将 url.Values 整合成表单请求的请求体，并设置请求头中的 content-type
+func (rb *Builder) BodyForm(data url.Values) *Builder {
+	return rb.
+		Body(BodyForm(data)).
+		ContentType("application/x-www-form-urlencoded")
+}
+```
+
+由于 `Builder.Body` 并不会检查 `Builder.getBody` 是否已经有值，所以如果在一次链式调用中重复调用多个设置请求体的方法，那么最终会以最后一次为准。
+
+从上面的代码可以看到，设置请求体的核心逻辑不在 Builder 的方法中，而是各个方法中传递给 `Builder.Body` 的函数，这些函数可以从入参获取 BodyGetter，具体来说有如下几个：
+
+```go
+// BodyReader is a BodyGetter that returns an io.Reader.
+func BodyReader(r io.Reader) BodyGetter {
+	return func() (io.ReadCloser, error) {
+		if rc, ok := r.(io.ReadCloser); ok {
+			return rc, nil
+		}
+		return io.NopCloser(r), nil
+	}
+}
+
+// BodyWriter is a BodyGetter that pipes writes into a request body.
+func BodyWriter(f func(w io.Writer) error) BodyGetter {
+	return func() (io.ReadCloser, error) {
+		r, w := io.Pipe()
+		go func() {
+			var err error
+			defer func() {
+				w.CloseWithError(err)
+			}()
+			err = f(w)
+		}()
+		return r, nil
+	}
+}
+
+// BodyBytes is a BodyGetter that returns the provided raw bytes.
+func BodyBytes(b []byte) BodyGetter {
+	return func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(b)), nil
+	}
+}
+
+// BodyJSON is a BodyGetter that marshals a JSON object.
+func BodyJSON(v interface{}) BodyGetter {
+	return func() (io.ReadCloser, error) {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return nil, err
+		}
+		return io.NopCloser(bytes.NewReader(b)), nil
+	}
+}
+
+// BodyForm is a BodyGetter that builds an encoded form body.
+func BodyForm(data url.Values) BodyGetter {
+	return func() (r io.ReadCloser, err error) {
+		return io.NopCloser(strings.NewReader(data.Encode())), nil
+	}
+}
+```
+
+
+
+### 2.1.2. ResponseHandler
+
+
+
+## 2.2. 其他
+
+除此之外，requests 还允许使用方在 Builder 中设置自定义的 `http.Client`，这个结构体可以通过配置内部字段而调整请求的处理流程，requests 为此还封装了一些常用的 helper 函数，从而让它具备更高的普适性。
+
+
+
+### 2.2.1. redirects
+
 TBD
 
 
 
-## 2.2. recorder
+### 2.2.2. recorder
 
 TBD
 
 
 
-## 2.3. redirects
-
-TBD
-
-
-
-## 2.4. transport
+### 2.2.3. transport
 
 TBD
