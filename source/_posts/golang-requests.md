@@ -176,7 +176,7 @@ func (rb *Builder) Do(req *http.Request) (err error) {
 
 
 
-### 2.1.1. BodyGetter
+## 2.2. BodyGetter
 
 getBody 的类型是 BodyGetter，它的具体定义为 `type BodyGetter = func() (io.ReadCloser, error)`，预期最终会返回一个 `io.ReadCloser`，这个返回值在 `Request` 方法中会作为 `http.NewRequestWithContext` 的 body 参数。
 
@@ -224,20 +224,24 @@ func (rb *Builder) BodyForm(data url.Values) *Builder {
 从上面的代码可以看到，设置请求体的核心逻辑不在 Builder 的方法中，而是各个方法中传递给 `Builder.Body` 的函数，这些函数可以从入参获取 BodyGetter，具体来说有如下几个：
 
 ```go
-// BodyReader is a BodyGetter that returns an io.Reader.
+// BodyReader 直接将入参的 Reader 封装一下返回，因为 BodyGetter 的定义就是要一个 ReadCloser
 func BodyReader(r io.Reader) BodyGetter {
 	return func() (io.ReadCloser, error) {
+    // 如果本身就是 ReadCloser，那么直接返回
 		if rc, ok := r.(io.ReadCloser); ok {
 			return rc, nil
 		}
+    // 否则套一层 NopCloser，这个方法返回一个 nopCloser 结构，拥有一个空的 Close 方法
 		return io.NopCloser(r), nil
 	}
 }
 
-// BodyWriter is a BodyGetter that pipes writes into a request body.
+// BodyWriter 接收一个入参为 Writer 的函数，Writer 由 requests 注入，函数直接向 Writer 中写入内容，这些内容会被另一侧的 Reader 获取到
 func BodyWriter(f func(w io.Writer) error) BodyGetter {
 	return func() (io.ReadCloser, error) {
+    // Pipe 返回一个 Writer 和 Reader，向 Writer 中写入内容能在 Reader 中读到
 		r, w := io.Pipe()
+    // 另起一个 goroutine，让 Writer 的写入和 Reader 的读取能同时进行
 		go func() {
 			var err error
 			defer func() {
@@ -245,18 +249,19 @@ func BodyWriter(f func(w io.Writer) error) BodyGetter {
 			}()
 			err = f(w)
 		}()
+    // 将 Reader 返回出去，供 http 标准库消费
 		return r, nil
 	}
 }
 
-// BodyBytes is a BodyGetter that returns the provided raw bytes.
+// BodyBytes 将一个 []byte 结构包装成 ReadCloser
 func BodyBytes(b []byte) BodyGetter {
 	return func() (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(b)), nil
 	}
 }
 
-// BodyJSON is a BodyGetter that marshals a JSON object.
+// BodyJSON 将某个结构 marshal 为 json 字节序列，然后用 NopCloser 包装后返回
 func BodyJSON(v interface{}) BodyGetter {
 	return func() (io.ReadCloser, error) {
 		b, err := json.Marshal(v)
@@ -267,7 +272,7 @@ func BodyJSON(v interface{}) BodyGetter {
 	}
 }
 
-// BodyForm is a BodyGetter that builds an encoded form body.
+// BodyForm 处理 application/x-www-form-urlencoded 类的请求体，包装后返回
 func BodyForm(data url.Values) BodyGetter {
 	return func() (r io.ReadCloser, err error) {
 		return io.NopCloser(strings.NewReader(data.Encode())), nil
@@ -277,28 +282,131 @@ func BodyForm(data url.Values) BodyGetter {
 
 
 
-### 2.1.2. ResponseHandler
+## 2.3. ResponseHandler
+
+在 requests 中，validators 和处理请求的 handler 都是 ResponseHandler 类型，这个结构的类型定义为 `type ResponseHandler = func(*http.Response) error`，意图也非常明显，就是拿到一个 Response 的指针后对齐做一些处理，如果期间遇到错误就通过返回值抛出。通过这样的函数，requests 允许用户灵活地校验和处理响应体，来适配不同的业务场景。
+
+先说 validators，顾名思义，它的作用是对某个 http 请求返回的内容做一些校验。我们可以通过 `Builder.AddValidator` 为某个请求加入所需的 validator，这个方法在 `Builder.validators` 列表中加入一个 ResponseHandler。我们在前面的 `Builder.Do` 方法中可以看到，在为某个响应执行 handler 之前会先跑一遍所有的 validator，当且仅当全部的 validator 都返回 nil 时才会进一步调用 handler。
+
+而如果没有调用过 AddValidator，那么 validators 列表中就是空的，此时 requests 会默认执行 DefaultValidator，它的定义为：
+
+```go
+var DefaultValidator ResponseHandler = CheckStatus(
+	http.StatusOK,
+	http.StatusCreated,
+	http.StatusAccepted,
+	http.StatusNonAuthoritativeInfo,
+	http.StatusNoContent,
+)
+```
+
+进一步来看 CheckStatus 这个函数，它的定义如下：
+
+```go
+func CheckStatus(acceptStatuses ...int) ResponseHandler {
+	return func(res *http.Response) error {
+		for _, code := range acceptStatuses {
+			if res.StatusCode == code {
+				return nil
+			}
+		}
+
+		return fmt.Errorf("%w: unexpected status: %d",
+			(*ResponseError)(res), res.StatusCode)
+	}
+}
+```
+
+具体来说，CheckStatus 接收一批 http 状态码作为白名单，当且仅当 Response 中的状态码在这个白名单中时才返回 nil，否则返回一个 error 让 `Builder.Do` 方法提前返回。除此之外，requests 中还提供 CheckContentType 和 CheckPeek 两种 helper 方法，前者检查响应头中的 content-type 是否在白名单中，后者接收一个函数用来检查响应体的前 n 个字节。
+
+所有的 validators 都通过后，`Builder.Do` 会执行定义在 Builder 上的 handler 方法，我们可以通过调用 `Builder.Handle` 方法来设置。如果没有调用过，那么 requests 会默认执行 consumeBody 方法，这个方法的定义如下：
+
+```go
+func consumeBody(res *http.Response) (err error) {
+	const maxDiscardSize = 640 * 1 << 10 // 最多读这么多字节，读完直接丢弃掉
+	if _, err = io.CopyN(io.Discard, res.Body, maxDiscardSize); err == io.EOF {
+		err = nil
+	}
+	return err
+}
+```
+
+除此之外，和 BodyGetter 一样，requests 为 handler 也提供了很多内置方法，这些方法在 Builder 上也有对应的 shortcut，具体如下：
+
+```go
+// ToJSON 将响应体 unmarshal 到入参的 v 中
+func (rb *Builder) ToJSON(v interface{}) *Builder {
+	return rb.Handle(ToJSON(v))
+}
+
+// ToString 将响应体的内容放到 sp 指向的字符串中
+func (rb *Builder) ToString(sp *string) *Builder {
+	return rb.Handle(ToString(sp))
+}
+
+// ToBytesBuffer 将响应体的内容放到入参的 Buffer 中
+func (rb *Builder) ToBytesBuffer(buf *bytes.Buffer) *Builder {
+	return rb.Handle(ToBytesBuffer(buf))
+}
+
+// ToWriter 将响应体内容 copy 到入参的 Writer 中，一个最常用的 Writer 就是 os.Stdout
+func (rb *Builder) ToWriter(w io.Writer) *Builder {
+	return rb.Handle(ToWriter(w))
+}
+```
+
+而这些 shortcut 内部的 ToXXX 的代码如下：
+
+```go
+func ToJSON(v interface{}) ResponseHandler {
+	return func(res *http.Response) error {
+    // 读出所有的内容放到 data 中
+		data, err := io.ReadAll(res.Body)
+		if err != nil {
+			return err
+		}
+    // 将 data unmarshal 到 v 对应的结构中
+		if err = json.Unmarshal(data, v); err != nil {
+			return err
+		}
+		return nil
+	}
+}
+
+func ToString(sp *string) ResponseHandler {
+	return func(res *http.Response) error {
+    // 将 Body 直接 copy 到 strings.Builder 中
+		var buf strings.Builder
+		_, err := io.Copy(&buf, res.Body)
+		if err == nil {
+			*sp = buf.String()
+		}
+    // 将复制的内容通过 String 整合成 string 结构写入 sp 指向的内存中，所以 sp 不能为 nil
+		return err
+	}
+}
+
+func ToBytesBuffer(buf *bytes.Buffer) ResponseHandler {
+	return func(res *http.Response) error {
+    // 直接复制
+		_, err := io.Copy(buf, res.Body)
+		return err
+	}
+}
+
+func ToWriter(w io.Writer) ResponseHandler {
+	return ToBufioReader(func(r *bufio.Reader) error {
+    // 直接复制
+		_, err := io.Copy(w, r)
+		return err
+	})
+}
+```
+
+除此之外，requests 还提供了 ToBufioReader 和 ToBufioScanner，这两者分别接受入参为 `*bufio.Reader` 和 `*bufio.Scanner` 的函数，可以从被 requests 注入的入参中持续地读取内容，这对于响应体非常大的请求是非常友好的。
 
 
 
-## 2.2. 其他
+## 2.4. 其他
 
-除此之外，requests 还允许使用方在 Builder 中设置自定义的 `http.Client`，这个结构体可以通过配置内部字段而调整请求的处理流程，requests 为此还封装了一些常用的 helper 函数，从而让它具备更高的普适性。
-
-
-
-### 2.2.1. redirects
-
-TBD
-
-
-
-### 2.2.2. recorder
-
-TBD
-
-
-
-### 2.2.3. transport
-
-TBD
+除此之外，requests 还允许使用方在 Builder 中设置自定义的 `http.Client`，这个结构体可以通过配置内部字段而调整请求的处理流程（RoundTripper），requests 为此还封装了一些常用的 helper 函数，从而让它具备更高的普适性，这部分就不展开说明了，感兴趣的朋友可以自行阅读相关代码（redirects.go、recorder.go、transport.go）。
